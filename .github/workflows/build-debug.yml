@@ -1,18 +1,18 @@
-name: 🏗️ 构建 Debug APK
+name: 🏗️ 构建 Release APK
 
 on:
-  push:
-    branches: [ master ]
-    paths:
-      - 'lyrico-app/**'
-      - 'lyrico-audiotag/**'
-      - 'lyrico-lyrics/**'
-      - 'gradle/**'
-      - 'build.gradle'
-      - 'settings.gradle'
-      - 'gradle.properties'
-      - 'gradlew'
-      - '.github/workflows/build-debug.yml'
+  # push:  # 自动触发已注释，仅保留手动触发
+  #   branches: [ master ]
+  #   paths:
+  #     - 'lyrico-app/**'
+  #     - 'lyrico-audiotag/**'
+  #     - 'lyrico-lyrics/**'
+  #     - 'gradle/**'
+  #     - 'build.gradle'
+  #     - 'settings.gradle'
+  #     - 'gradle.properties'
+  #     - 'gradlew'
+  #     - '.github/workflows/build-debug.yml'
   workflow_dispatch:
 
 concurrency:
@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   build:
-    name: 🏗️ 构建 Debug APK
+    name: 🏗️ 构建 Release APK
     runs-on: ubuntu-latest
 
     steps:
@@ -49,12 +49,12 @@ jobs:
       - name: 🐘 配置 Gradle
         uses: gradle/actions/setup-gradle@v5
 
-      - name: 🛠️ 构建 Debug APK
-        run: ./gradlew assembleDebug --stacktrace
+      - name: 🛠️ 构建 Release APK
+        run: ./gradlew assembleRelease --stacktrace
 
       - name: 📤 上传 APK
         uses: actions/upload-artifact@v4
         with:
-          name: Lyrico-debug
-          path: lyrico-app/build/outputs/apk/debug/*.apk
-          retention-days: 30
+          name: Lyrico-release
+          path: lyrico-app/build/outputs/apk/release/*.apk
+          retention-days: 3
