@@ -1,11 +1,23 @@
 package com.lonx.lyrico.screens
 
 import android.content.Intent
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -16,29 +28,44 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.lonx.lyrico.R
 import com.lonx.lyrico.data.model.entity.FolderEntity
+import com.lonx.lyrico.data.model.entity.SongEntity
+import com.lonx.lyrico.ui.components.bar.SongBatchSelectionActions
+import com.lonx.lyrico.ui.components.bar.SongSelectionTopAppBar
 import com.lonx.lyrico.ui.components.scaffoldTopHorizontalPadding
+import com.lonx.lyrico.ui.components.song.SongActionSheets
+import com.lonx.lyrico.ui.components.song.SongListItem
+import com.lonx.lyrico.ui.components.song.SongListItemActions
 import com.lonx.lyrico.utils.UriUtils
 import com.lonx.lyrico.viewmodel.FolderManagerViewModel
+import com.lonx.lyrico.viewmodel.SongSelectionViewModel
+import com.lonx.lyrico.viewmodel.SortBy
+import com.lonx.lyrico.viewmodel.SortInfo
+import com.lonx.lyrico.viewmodel.SortOrder
 import com.ramcosta.composedestinations.annotation.Destination
 import com.ramcosta.composedestinations.annotation.RootGraph
-import com.ramcosta.composedestinations.generated.destinations.FolderSongsDestination
+import com.ramcosta.composedestinations.generated.destinations.EditMetadataDestination
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
+import kotlinx.coroutines.launch
 import org.koin.androidx.compose.koinViewModel
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
@@ -50,13 +77,16 @@ import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.LinearProgressIndicator
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.ScrollBehavior
 import top.yukonga.miuix.kmp.basic.SmallTopAppBar
+import top.yukonga.miuix.kmp.basic.TabRowWithContour
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.AddFolder
 import top.yukonga.miuix.kmp.icon.extended.Back
 import top.yukonga.miuix.kmp.icon.extended.More
+import top.yukonga.miuix.kmp.icon.extended.Sort
 import top.yukonga.miuix.kmp.menu.OverlayIconDropdownMenu
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
@@ -70,13 +100,53 @@ fun FolderManagerScreen(
     navigator: DestinationsNavigator
 ) {
     val viewModel: FolderManagerViewModel = koinViewModel()
-    val uiState by viewModel.uiState.collectAsState()
-    val folders = uiState.folders
-    val context = androidx.compose.ui.platform.LocalContext.current
+    val selectionViewModel: SongSelectionViewModel = koinViewModel()
 
-    var selectedFolderId by remember { mutableLongStateOf(-1L) }
-    val currentFolder = remember(selectedFolderId, folders) {
+    val uiState by viewModel.uiState.collectAsState()
+    val sortInfo by viewModel.sortInfo.collectAsState()
+    val currentFolderSongs by viewModel.currentFolderSongs.collectAsState()
+    val isSelectionMode by selectionViewModel.isSelectionMode.collectAsState()
+    val selectedSongUris by selectionViewModel.selectedSongUris.collectAsState()
+
+    val folders = uiState.folders
+    val folderTree = remember(folders, uiState.songs) {
+        buildFolderTree(folders, uiState.songs)
+    }
+    val context = LocalContext.current
+
+    var currentFolderId by remember { mutableLongStateOf(ROOT_FOLDER_ID) }
+    var selectedFolderId by remember { mutableLongStateOf(ROOT_FOLDER_ID) }
+    var isFabMenuExpanded by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val pagerState = rememberPagerState(pageCount = { 2 })
+    var selectedSong by remember { mutableStateOf<SongEntity?>(null) }
+    var showMenuSheet by remember { mutableStateOf(false) }
+    var showDetailSheet by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    var showRenameDialog by remember { mutableStateOf(false) }
+
+    val selectedFolder = remember(selectedFolderId, folders) {
         folders.find { it.id == selectedFolderId }
+    }
+    val currentFolder = remember(currentFolderId, folders) {
+        folders.find { it.id == currentFolderId }
+    }
+    LaunchedEffect(currentFolder?.id) {
+        viewModel.setCurrentFolderId(currentFolder?.id)
+    }
+    val currentNode = remember(currentFolder, folderTree) {
+        currentFolder?.let { folderTree.nodesById[it.id] }
+    }
+    val parentFolder = remember(currentNode, folderTree) {
+        currentNode?.parentId?.let { folderTree.nodesById[it]?.folder }
+    }
+    val currentChildFolders = remember(currentNode, folderTree) {
+        currentNode?.childFolders ?: folderTree.rootFolders
+    }
+    val currentSongs = if (currentFolder != null) {
+        currentFolderSongs
+    } else {
+        emptyList()
     }
     val showConfirmDialog = remember { mutableStateOf(false) }
 
@@ -102,157 +172,518 @@ fun FolderManagerScreen(
             )
         }
     }
+
     val topAppBarScrollBehavior = MiuixScrollBehavior()
-    Scaffold(
-        topBar = {
-            SmallTopAppBar(
-                title = stringResource(R.string.folder_manager_title),
-                navigationIcon = {
-                    IconButton(
-                        onClick = { navigator.navigateUp() }) {
-                        Icon(
-                            imageVector = MiuixIcons.Back,
-                            contentDescription = null
-                        )
-                    }
-                },
-                actions = {
-                    IconButton(
-                        onClick = { folderPickerLauncher.launch(null) }
-                    ) {
-                        Icon(
-                            imageVector = MiuixIcons.AddFolder,
-                            contentDescription = null
-                        )
-                    }
-                },
-                scrollBehavior = topAppBarScrollBehavior
-            )
+
+    BackHandler(enabled = isSelectionMode || currentFolder != null) {
+        when {
+            isFabMenuExpanded -> {
+                isFabMenuExpanded = false
+            }
+
+            isSelectionMode -> {
+                selectionViewModel.exitSelectionMode()
+            }
+
+            currentFolder != null -> {
+                currentFolderId = parentFolder?.id ?: ROOT_FOLDER_ID
+            }
         }
-    ) { paddingValues ->
-        currentFolder?.let { folder ->
-            WindowDialog(
-                title = stringResource(R.string.dialog_remove_folder_title),
-                show = showConfirmDialog.value,
-                onDismissRequest = { showConfirmDialog.value = false }
-            ) {
-                Column {
-                    Text(
-                        text = folder.path,
-                        modifier = Modifier.fillMaxWidth(),
-                        color = MiuixTheme.colorScheme.onBackground
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = stringResource(R.string.dialog_remove_folder_content_tip),
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        fontSize = MiuixTheme.textStyles.body2.fontSize
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Row(
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        TextButton(
-                            text = stringResource(R.string.cancel),
-                            onClick = {
-                                showConfirmDialog.value = false
-                            },
-                            modifier = Modifier.weight(1f),
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        Scaffold(
+            topBar = {
+                AnimatedContent(
+                    targetState = isSelectionMode,
+                    label = "FolderManagerTopBarAnimation",
+                    transitionSpec = {
+                        val animationDuration = 300
+                        val enter = fadeIn(tween(animationDuration)) +
+                                slideInVertically(
+                                    animationSpec = tween(
+                                        durationMillis = animationDuration,
+                                        easing = FastOutSlowInEasing
+                                    ),
+                                    initialOffsetY = { -it / 3 }
+                                )
+                        val exit = fadeOut(tween(animationDuration)) +
+                                slideOutVertically(
+                                    animationSpec = tween(
+                                        durationMillis = animationDuration,
+                                        easing = FastOutSlowInEasing
+                                    ),
+                                    targetOffsetY = { -it / 3 }
+                                )
+
+                        (enter togetherWith exit).using(SizeTransform(clip = false))
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) { selectionMode ->
+                    if (selectionMode) {
+                        SongSelectionTopAppBar(
+                            songs = currentSongs,
+                            selectedSongUris = selectedSongUris,
+                            scrollBehavior = topAppBarScrollBehavior,
+                            onSelectAll = selectionViewModel::selectAll,
+                            onDeselectAll = selectionViewModel::deselectAll,
+                            onClose = selectionViewModel::exitSelectionMode
                         )
-                        Spacer(Modifier.width(20.dp))
-                        TextButton(
-                            text = stringResource(R.string.confirm),
-                            onClick = {
-                                showConfirmDialog.value = false
-                                viewModel.deleteFolder(folder)
-                                selectedFolderId = -1L
+                    } else {
+                        SmallTopAppBar(
+                            title = if (currentFolderId == ROOT_FOLDER_ID) {
+                                stringResource(R.string.folder_manager_title)
+                            } else {
+                                currentFolder?.path
+                                    ?.substringAfterLast("/")
+                                    ?.ifBlank { currentFolder.path }
+                                    ?: stringResource(R.string.folder_manager_title)
                             },
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary(),
+                            navigationIcon = {
+                                IconButton(
+                                    onClick = {
+                                        if (currentFolder != null) {
+                                            currentFolderId =
+                                                parentFolder?.id ?: ROOT_FOLDER_ID
+                                        } else {
+                                            navigator.navigateUp()
+                                        }
+                                    }
+                                ) {
+                                    Icon(
+                                        imageVector = MiuixIcons.Back,
+                                        contentDescription = null
+                                    )
+                                }
+                            },
+                            actions = {
+                                if (currentFolderId == ROOT_FOLDER_ID) {
+                                    IconButton(
+                                        onClick = { folderPickerLauncher.launch(null) }
+                                    ) {
+                                        Icon(
+                                            imageVector = MiuixIcons.AddFolder,
+                                            contentDescription = null
+                                        )
+                                    }
+                                }
+
+                                if (
+                                    currentFolder != null &&
+                                    pagerState.currentPage == 1 &&
+                                    currentSongs.isNotEmpty()
+                                ) {
+                                    val sortTypes = SortBy.entries.toList()
+                                    val sortEntries = DropdownEntry(
+                                        items = sortTypes.map { sortType ->
+                                            val isSelected = sortInfo.sortBy == sortType
+
+                                            DropdownItem(
+                                                text = stringResource(sortType.labelRes),
+                                                selected = isSelected,
+                                                summary = if (isSelected) {
+                                                    stringResource(
+                                                        when (sortInfo.order) {
+                                                            SortOrder.ASC -> R.string.sort_ascending
+                                                            SortOrder.DESC -> R.string.sort_descending
+                                                        }
+                                                    )
+                                                } else {
+                                                    null
+                                                },
+                                                onClick = {
+                                                    val newOrder = if (isSelected) {
+                                                        if (sortInfo.order == SortOrder.ASC) {
+                                                            SortOrder.DESC
+                                                        } else {
+                                                            SortOrder.ASC
+                                                        }
+                                                    } else {
+                                                        SortOrder.ASC
+                                                    }
+
+                                                    viewModel.onSortChange(
+                                                        SortInfo(
+                                                            sortBy = sortType,
+                                                            order = newOrder
+                                                        )
+                                                    )
+                                                }
+                                            )
+                                        }
+                                    )
+
+                                    OverlayIconDropdownMenu(
+                                        entries = listOf(sortEntries)
+                                    ) {
+                                        Icon(
+                                            imageVector = MiuixIcons.Sort,
+                                            contentDescription = stringResource(R.string.cd_sort)
+                                        )
+                                    }
+                                }
+                            },
+                            scrollBehavior = topAppBarScrollBehavior
                         )
                     }
                 }
             }
-        }
+        ) { paddingValues ->
+            selectedFolder?.let { folder ->
+                WindowDialog(
+                    title = stringResource(R.string.dialog_remove_folder_title),
+                    show = showConfirmDialog.value,
+                    onDismissRequest = { showConfirmDialog.value = false }
+                ) {
+                    Column {
+                        Text(
+                            text = folder.path,
+                            modifier = Modifier.fillMaxWidth(),
+                            color = MiuixTheme.colorScheme.onBackground
+                        )
 
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(scaffoldTopHorizontalPadding(paddingValues))
-        ) {
-            Text(
-                text = stringResource(R.string.folder_tip_disabled_logic),
-                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
-                color = MiuixTheme.colorScheme.onSurfaceVariantActions,
-                modifier = Modifier.padding(12.dp)
-            )
-            uiState.error?.let { error ->
-                Text(
-                    text = stringResource(R.string.folder_scan_failed, error),
-                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
-                    color = MiuixTheme.colorScheme.error,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-                )
-            }
-            LazyColumn(
-                modifier = Modifier
-                    .scrollEndHaptic()
-                    .overScrollVertical()
-                    .nestedScroll(topAppBarScrollBehavior.nestedScrollConnection)
-                    .fillMaxHeight(),
-                overscrollEffect = null,
-            ) {
-                items(items = folders) { folder ->
-                    FolderListItem(
-                        folder = folder,
-                        isScanning = folder.id in uiState.scanningFolderIds,
-                        isQueued = folder.id in uiState.queuedFolderIds,
-                        onClick = {
-                            navigator.navigate(
-                                FolderSongsDestination(
-                                    folder.id,
-                                    folder.path
-                                )
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Text(
+                            text = stringResource(R.string.dialog_remove_folder_content_tip),
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            fontSize = MiuixTheme.textStyles.body2.fontSize
+                        )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Row(
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            TextButton(
+                                text = stringResource(R.string.cancel),
+                                onClick = {
+                                    showConfirmDialog.value = false
+                                },
+                                modifier = Modifier.weight(1f),
                             )
-                        },
-                        onDelete = {
-                            selectedFolderId = folder.id
-                            showConfirmDialog.value = true
-                        },
-                        onRefresh = {
-                            viewModel.refreshFolder(folder)
-                        },
-                        onIgnoredChange = { ignored ->
-                            viewModel.setFolderIgnored(folder, ignored)
+
+                            Spacer(Modifier.width(20.dp))
+
+                            TextButton(
+                                text = stringResource(R.string.confirm),
+                                onClick = {
+                                    showConfirmDialog.value = false
+                                    viewModel.deleteFolder(folder)
+                                    selectedFolderId = ROOT_FOLDER_ID
+                                    if (folder.id == currentFolderId) {
+                                        currentFolderId =
+                                            parentFolder?.id ?: ROOT_FOLDER_ID
+                                    }
+                                },
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.textButtonColorsPrimary(),
+                            )
+                        }
+                    }
+                }
+            }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(scaffoldTopHorizontalPadding(paddingValues))
+            ) {
+                FolderPathHeader(
+                    currentPath = currentFolder?.path
+                        ?: stringResource(R.string.folder_root_path),
+                    folderCount = currentChildFolders.size,
+                    songCount = currentSongs.size
+                )
+
+                uiState.error?.let { error ->
+                    Text(
+                        text = stringResource(R.string.folder_scan_failed, error),
+                        fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                        color = MiuixTheme.colorScheme.error,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                    )
+                }
+
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp)
+                        .padding(bottom = 8.dp)
+                ) {
+                    TabRowWithContour(
+                        tabs = listOf(
+                            stringResource(R.string.folder_tab_folders),
+                            stringResource(R.string.folder_tab_songs)
+                        ),
+                        selectedTabIndex = pagerState.currentPage,
+                        onTabSelected = { index ->
+                            scope.launch {
+                                pagerState.animateScrollToPage(index)
+                            }
                         }
                     )
                 }
+
+                HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                ) { page ->
+                    when (page) {
+                        0 -> {
+                            FolderChildrenPage(
+                                folders = currentChildFolders,
+                                folderTree = folderTree,
+                                scanningFolderIds = uiState.scanningFolderIds,
+                                queuedFolderIds = uiState.queuedFolderIds,
+                                isSelectionMode = isSelectionMode,
+                                topAppBarScrollBehavior = topAppBarScrollBehavior,
+                                onFolderClick = { folder ->
+                                    currentFolderId = folder.id
+                                },
+                                onDeleteFolder = { folder ->
+                                    selectedFolderId = folder.id
+                                    showConfirmDialog.value = true
+                                },
+                                onRefreshFolder = viewModel::refreshFolder,
+                                onIgnoredChange = viewModel::setFolderIgnored
+                            )
+                        }
+
+                        1 -> {
+                            FolderCurrentSongsPage(
+                                songs = currentSongs,
+                                isSelectionMode = isSelectionMode,
+                                selectedSongUris = selectedSongUris,
+                                topAppBarScrollBehavior = topAppBarScrollBehavior,
+                                onSongClick = { song ->
+                                    navigator.navigate(
+                                        EditMetadataDestination(songFileUri = song.uri)
+                                    )
+                                },
+                                onToggleSelection = { song ->
+                                    selectionViewModel.toggleSelection(song.uri)
+                                },
+                                onShowSongMenu = { song ->
+                                    selectedSong = song
+                                    showMenuSheet = true
+                                }
+                            )
+                        }
+                    }
+                }
             }
+
+            SongActionSheets(
+                selectedSong = selectedSong,
+                showMenuSheet = showMenuSheet,
+                showDetailSheet = showDetailSheet,
+                showDeleteDialog = showDeleteDialog,
+                showRenameDialog = showRenameDialog,
+                onDismissMenu = { showMenuSheet = false },
+                onDismissMenuFinished = { selectedSong = null },
+                onDismissDetail = { showDetailSheet = false },
+                onDismissDelete = { showDeleteDialog = false },
+                onDismissRename = { showRenameDialog = false },
+                onShowDetail = { showDetailSheet = true },
+                onShowDelete = { showDeleteDialog = true },
+                onShowRename = { showRenameDialog = true },
+                onPlay = { song ->
+                    selectionViewModel.play(context, song)
+                },
+                onDelete = { song ->
+                    selectionViewModel.delete(song)
+                },
+                onRename = { song, newFileName ->
+                    selectionViewModel.renameSong(song, newFileName)
+                }
+            )
+        }
+
+        SongBatchSelectionActions(
+            navigator = navigator,
+            songs = currentSongs,
+            show = isSelectionMode && pagerState.currentPage == 1 && currentSongs.isNotEmpty(),
+            expanded = isFabMenuExpanded,
+            selectedSongUris = selectedSongUris,
+            onExpandedChange = { isFabMenuExpanded = it },
+            onSetSelectionUris = selectionViewModel::setSelectionUris,
+            onBatchDelete = selectionViewModel::batchDelete,
+            onBatchShare = selectionViewModel::batchShare
+        )
+    }
+}
+
+private const val ROOT_FOLDER_ID = -1L
+
+@Composable
+private fun FolderChildrenPage(
+    folders: List<FolderEntity>,
+    folderTree: FolderTree,
+    scanningFolderIds: Set<Long>,
+    queuedFolderIds: Set<Long>,
+    isSelectionMode: Boolean,
+    topAppBarScrollBehavior: ScrollBehavior,
+    onFolderClick: (FolderEntity) -> Unit,
+    onDeleteFolder: (FolderEntity) -> Unit,
+    onRefreshFolder: (FolderEntity) -> Unit,
+    onIgnoredChange: (FolderEntity, Boolean) -> Unit
+) {
+    LazyColumn(
+        modifier = Modifier
+            .scrollEndHaptic()
+            .overScrollVertical()
+            .nestedScroll(topAppBarScrollBehavior.nestedScrollConnection)
+            .fillMaxHeight(),
+        contentPadding = PaddingValues(bottom = 12.dp),
+        overscrollEffect = null
+    ) {
+        items(
+            items = folders,
+            key = { folder -> "folder-${folder.id}" }
+        ) { folder ->
+            FolderListItem(
+                folder = folder,
+                node = folderTree.nodesById.getValue(folder.id),
+                isScanning = folder.id in scanningFolderIds,
+                isQueued = folder.id in queuedFolderIds,
+                isSelectionMode = isSelectionMode,
+                onClick = {
+                    if (!isSelectionMode) {
+                        onFolderClick(folder)
+                    }
+                },
+                canRemove = folder.addedBySaf,
+                onDelete = {
+                    onDeleteFolder(folder)
+                },
+                onRefresh = {
+                    onRefreshFolder(folder)
+                },
+                onIgnoredChange = { ignored ->
+                    onIgnoredChange(folder, ignored)
+                }
+            )
         }
     }
 }
 
+@Composable
+private fun FolderCurrentSongsPage(
+    songs: List<SongEntity>,
+    isSelectionMode: Boolean,
+    selectedSongUris: Set<String>,
+    topAppBarScrollBehavior: ScrollBehavior,
+    onSongClick: (SongEntity) -> Unit,
+    onToggleSelection: (SongEntity) -> Unit,
+    onShowSongMenu: (SongEntity) -> Unit
+) {
+    LazyColumn(
+        modifier = Modifier
+            .scrollEndHaptic()
+            .overScrollVertical()
+            .nestedScroll(topAppBarScrollBehavior.nestedScrollConnection)
+            .fillMaxHeight(),
+        contentPadding = PaddingValues(bottom = 12.dp),
+        overscrollEffect = null
+    ) {
+        items(
+            items = songs,
+            key = { song ->
+                song.uri.takeIf { it.isNotBlank() && it != "0" } ?: "song-${song.id}"
+            }
+        ) { song ->
+            SongListItem(
+                song = song,
+                modifier = Modifier.animateItem(),
+                isSelectionMode = isSelectionMode,
+                isSelected = selectedSongUris.contains(song.uri),
+                onClick = {
+                    onSongClick(song)
+                },
+                onToggleSelection = {
+                    onToggleSelection(song)
+                },
+                trailingContent = {
+                    Box(modifier = Modifier.padding(end = 8.dp)) {
+                        SongListItemActions(
+                            isSelectionMode = isSelectionMode,
+                            isSelected = selectedSongUris.contains(song.uri),
+                            onToggleSelection = {
+                                onToggleSelection(song)
+                            },
+                            onShowMenu = {
+                                onShowSongMenu(song)
+                            }
+                        )
+                    }
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun FolderPathHeader(
+    currentPath: String,
+    folderCount: Int,
+    songCount: Int
+) {
+    Card(
+        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+    ) {
+        BasicComponent(
+            title = currentPath,
+            summary = stringResource(R.string.folder_browser_count_format, folderCount, songCount)
+        )
+    }
+}
 
 @Composable
 private fun FolderListItem(
     folder: FolderEntity,
+    node: FolderTreeNode,
     isScanning: Boolean,
     isQueued: Boolean,
+    isSelectionMode: Boolean,
     onClick: () -> Unit,
+    canRemove: Boolean,
     onDelete: () -> Unit,
     onRefresh: () -> Unit,
     onIgnoredChange: (Boolean) -> Unit
 ) {
     val folderName = folder.path.substringAfterLast("/").ifBlank { folder.path }
-    val isBusy = isScanning || isQueued
+    val isBusy = isScanning || isQueued || isSelectionMode
     val statusText = when {
-        isScanning -> stringResource(R.string.folder_scanning)
-        isQueued -> stringResource(R.string.folder_scan_queued)
-        folder.isIgnored -> stringResource(R.string.folder_hidden_song_count_format, folder.songCount)
-        else -> stringResource(R.string.folder_song_count_format, folder.songCount)
+        isScanning -> {
+            stringResource(R.string.folder_scanning)
+        }
+
+        isQueued -> {
+            stringResource(R.string.folder_scan_queued)
+        }
+
+        folder.isIgnored -> {
+            stringResource(
+                R.string.folder_hidden_child_song_count_format,
+                node.childFolders.size,
+                node.subtreeSongCount
+            )
+        }
+
+        else -> {
+            stringResource(
+                R.string.folder_child_song_count_format,
+                node.childFolders.size,
+                node.subtreeSongCount
+            )
+        }
     }
-    val actionEntry = DropdownEntry(
-        items = listOf(
+
+    val actionItems = buildList {
+        add(
             DropdownItem(
                 text = if (folder.isIgnored) {
                     stringResource(R.string.folder_action_show)
@@ -262,25 +693,39 @@ private fun FolderListItem(
                 onClick = {
                     onIgnoredChange(!folder.isIgnored)
                 }
-            ),
+            )
+        )
+
+        add(
             DropdownItem(
                 text = stringResource(R.string.action_refresh_folder),
                 onClick = {
-                    if (!isBusy){ onRefresh() }
-                }
-            ),
-            DropdownItem(
-                text = stringResource(R.string.folder_action_remove),
-                onClick = {
-                    if (!isBusy){ onDelete() }
+                    if (!isBusy) {
+                        onRefresh()
+                    }
                 }
             )
         )
-    )
+
+        if (canRemove) {
+            add(
+                DropdownItem(
+                    text = stringResource(R.string.folder_action_remove),
+                    onClick = {
+                        if (!isBusy) {
+                            onDelete()
+                        }
+                    }
+                )
+            )
+        }
+    }
+
+    val actionEntry = DropdownEntry(items = actionItems)
 
     Card(
-        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-    ){
+        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+    ) {
         BasicComponent(
             endActions = {
                 OverlayIconDropdownMenu(
@@ -308,13 +753,17 @@ private fun FolderListItem(
                 color = MiuixTheme.colorScheme.onBackground,
                 fontWeight = FontWeight.Medium
             )
+
             Spacer(modifier = Modifier.height(3.dp))
+
             Text(
                 text = folder.path,
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 fontSize = MiuixTheme.textStyles.body2.fontSize
             )
+
             Spacer(modifier = Modifier.height(6.dp))
+
             Text(
                 text = statusText,
                 color = MiuixTheme.colorScheme.onSurfaceVariantActions,
@@ -322,4 +771,86 @@ private fun FolderListItem(
             )
         }
     }
+}
+
+private data class FolderTree(
+    val nodesById: Map<Long, FolderTreeNode>,
+    val rootFolders: List<FolderEntity>
+)
+
+private data class FolderTreeNode(
+    val folder: FolderEntity,
+    val parentId: Long?,
+    val childFolders: List<FolderEntity>,
+    val directSongCount: Int,
+    val subtreeSongCount: Int
+)
+
+private fun buildFolderTree(
+    folders: List<FolderEntity>,
+    songs: List<SongEntity>
+): FolderTree {
+    val normalizedPaths = folders.associate { folder ->
+        folder.id to folder.path.normalizeFolderPath()
+    }
+
+    val directSongCounts = songs.groupingBy { song ->
+        song.folderId
+    }.eachCount()
+
+    val parentIds = folders.associate { folder ->
+        val path = normalizedPaths.getValue(folder.id)
+        val parent = folders
+            .filter { candidate ->
+                val candidatePath = normalizedPaths.getValue(candidate.id)
+                candidate.id != folder.id &&
+                        candidatePath.isNotBlank() &&
+                        path.startsWith("$candidatePath/")
+            }
+            .maxByOrNull { candidate ->
+                normalizedPaths.getValue(candidate.id).length
+            }
+
+        folder.id to parent?.id
+    }
+
+    val childrenByParentId = folders
+        .groupBy { folder -> parentIds.getValue(folder.id) }
+        .mapValues { (_, children) ->
+            children.sortedBy { it.path.normalizeFolderPath() }
+        }
+
+    val subtreeSongCounts = mutableMapOf<Long, Int>()
+
+    fun subtreeSongCount(folderId: Long): Int {
+        return subtreeSongCounts.getOrPut(folderId) {
+            directSongCounts[folderId].orZero() +
+                    childrenByParentId[folderId].orEmpty().sumOf { child ->
+                        subtreeSongCount(child.id)
+                    }
+        }
+    }
+
+    val nodesById = folders.associate { folder ->
+        folder.id to FolderTreeNode(
+            folder = folder,
+            parentId = parentIds.getValue(folder.id),
+            childFolders = childrenByParentId[folder.id].orEmpty(),
+            directSongCount = directSongCounts[folder.id].orZero(),
+            subtreeSongCount = subtreeSongCount(folder.id)
+        )
+    }
+
+    return FolderTree(
+        nodesById = nodesById,
+        rootFolders = childrenByParentId[null].orEmpty()
+    )
+}
+
+private fun Int?.orZero(): Int = this ?: 0
+
+private fun String.normalizeFolderPath(): String {
+    return replace('\\', '/')
+        .trim()
+        .trimEnd('/')
 }
