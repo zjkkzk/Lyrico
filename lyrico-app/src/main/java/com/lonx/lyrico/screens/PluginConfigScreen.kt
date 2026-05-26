@@ -65,6 +65,7 @@ import com.lonx.lyrico.viewmodel.SearchSourceConfigViewModel
 import com.ramcosta.composedestinations.annotation.Destination
 import com.ramcosta.composedestinations.annotation.RootGraph
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
+import dev.jeziellago.compose.markdowntext.MarkdownText
 import kotlinx.coroutines.launch
 import org.koin.androidx.compose.koinViewModel
 import top.yukonga.miuix.kmp.basic.BasicComponent
@@ -85,7 +86,9 @@ import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Back
+import top.yukonga.miuix.kmp.icon.extended.Hide
 import top.yukonga.miuix.kmp.icon.extended.Ok
+import top.yukonga.miuix.kmp.icon.extended.Show
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.preference.WindowDropdownPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -764,6 +767,12 @@ private fun PluginConfigFormItem(
         PluginConfigFieldType.TEXTAREA,
         PluginConfigFieldType.PASSWORD,
         PluginConfigFieldType.NUMBER -> {
+            var passwordVisible by rememberSaveable(field.key) {
+                mutableStateOf(false)
+            }
+
+            val isPassword = field.type == PluginConfigFieldType.PASSWORD
+
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -776,7 +785,7 @@ private fun PluginConfigFormItem(
                     singleLine = field.type != PluginConfigFieldType.TEXTAREA,
                     minLines = if (field.type != PluginConfigFieldType.TEXTAREA) 1 else 2,
                     maxLines = if (field.type != PluginConfigFieldType.TEXTAREA) 1 else 8,
-                    visualTransformation = if (field.type == PluginConfigFieldType.PASSWORD) {
+                    visualTransformation = if (isPassword && !passwordVisible) {
                         PasswordVisualTransformation()
                     } else {
                         VisualTransformation.None
@@ -785,6 +794,30 @@ private fun PluginConfigFormItem(
                         KeyboardOptions(keyboardType = KeyboardType.Number)
                     } else {
                         KeyboardOptions.Default
+                    },
+                    trailingIcon = if (isPassword) {
+                        {
+                            IconButton(
+                                onClick = {
+                                    passwordVisible = !passwordVisible
+                                }
+                            ) {
+                                Icon(
+                                    imageVector = if (passwordVisible) {
+                                        MiuixIcons.Hide
+                                    } else {
+                                        MiuixIcons.Show
+                                    },
+                                    contentDescription = if (passwordVisible) {
+                                        stringResource(R.string.password_hide)
+                                    } else {
+                                        stringResource(R.string.password_show)
+                                    }
+                                )
+                            }
+                        }
+                    } else {
+                        null
                     },
                     onValueChange = { input ->
                         onValueChange(
@@ -807,6 +840,34 @@ private fun PluginConfigFormItem(
                         } else {
                             MiuixTheme.colorScheme.error
                         }
+                    )
+                }
+            }
+        }
+
+        PluginConfigFieldType.MARKDOWN -> {
+            val markdown = field.defaultValue.ifBlank { field.summary }
+            if (markdown.isNotBlank()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    field.title.takeIf { it.isNotBlank() }?.let { title ->
+                        Text(
+                            text = title,
+                            style = MiuixTheme.textStyles.body2,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    MarkdownText(
+                        modifier = Modifier.fillMaxWidth(),
+                        markdown = markdown,
+                        linkColor = MiuixTheme.colorScheme.primary,
+                        style = MiuixTheme.textStyles.body2.copy(
+                            color = MiuixTheme.colorScheme.onSurface
+                        )
                     )
                 }
             }
