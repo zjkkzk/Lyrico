@@ -15,6 +15,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.lonx.audiotag.model.AudioPicture
 import com.lonx.audiotag.model.AudioTagData
+import com.lonx.audiotag.model.CustomTagField
 import com.lonx.lyrico.R
 import com.lonx.lyrico.data.editfield.EditFieldScene
 import com.lonx.lyrico.data.editfield.EditFieldVisibilityRepository
@@ -32,6 +33,7 @@ import com.lonx.lyrico.data.model.entity.SongEntity
 import com.lonx.lyrico.data.model.plugin.GlobalFieldProcessSettings
 import com.lonx.lyrico.data.model.plugin.defaultPluginFieldProcessConfig
 import com.lonx.lyrico.data.repository.AppLogRepository
+import com.lonx.lyrico.data.repository.CustomTagSettingsRepository
 import com.lonx.lyrico.data.repository.PluginFieldProcessConfigRepository
 import com.lonx.lyrico.data.repository.PlaybackRepository
 import com.lonx.lyrico.data.repository.SettingsDefaults
@@ -48,6 +50,7 @@ import com.lonx.lyrico.utils.ReplayGainError
 import com.lonx.lyrico.utils.ReplayGainScanner
 import com.lonx.lyrico.utils.UiMessage
 import com.lonx.lyrico.utils.getCoverSourceType
+import com.lonx.lyrico.utils.lyrics.document.LyricsDocumentPipeline
 import com.lonx.lyrico.data.model.lyrics.SongSearchResult
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -61,6 +64,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.util.Locale
 
 data class EditMetadataUiState(
     val songInfo: SongInfo? = null,
@@ -98,6 +102,12 @@ data class EditMetadataUiState(
     val sameAlbumCoverMessage: UiMessage? = null
 )
 
+private data class LyricsFormatConversionSession(
+    val sourceFormat: LyricFormat,
+    val sourceLyrics: String,
+    val lastRenderedLyrics: String
+)
+
 class EditMetadataViewModel(
     private val songRepository: SongRepository,
     private val settingsRepository: SettingsRepository,
@@ -106,7 +116,8 @@ class EditMetadataViewModel(
     private val appLogRepository: AppLogRepository,
     private val editFieldVisibilityRepository: EditFieldVisibilityRepository,
     private val pluginFieldProcessConfigRepository: PluginFieldProcessConfigRepository,
-    private val searchSourceProvider: SearchSourceProvider
+    private val searchSourceProvider: SearchSourceProvider,
+    private val customTagSettingsRepository: CustomTagSettingsRepository,
 ) : ViewModel() {
 
     private val TAG = "EditMetadataVM"
@@ -142,6 +153,7 @@ class EditMetadataViewModel(
     // 存储当前正在操作的 URI 字符串
     private var currentSongUri: String? = null
     private var preOffsetLyrics: String? = null
+    private var lyricsFormatConversionSession: LyricsFormatConversionSession? = null
     private var scanJob: Job? = null
     // 记录当前的累计偏移量，供 UI 显示
     private val _currentShiftOffset = MutableStateFlow(0L)
@@ -160,8 +172,18 @@ class EditMetadataViewModel(
                 initialValue = emptyList(),
             )
 
+    val visibleCustomKeys: StateFlow<List<String>> =
+        customTagSettingsRepository.settingsFlow
+            .map { it.visibleKeys }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = emptyList(),
+            )
+
     fun readMetadata(uriString: String) {
         currentSongUri = uriString
+        lyricsFormatConversionSession = null
 
         viewModelScope.launch {
             try {
@@ -214,6 +236,77 @@ class EditMetadataViewModel(
             )
         }
     }
+
+    fun updateCustomFieldValue(key: String, value: String) {
+        val normalizedKey = normalizeCustomTagKey(key) ?: return
+
+        updateTag {
+            val fields = customFields.toMutableList()
+            val index = fields.indexOfFirst { it.key.equals(normalizedKey, ignoreCase = true) }
+
+            if (index >= 0) {
+                fields[index] = fields[index].copy(key = normalizedKey, value = value)
+            } else {
+                fields += CustomTagField(
+                    key = normalizedKey,
+                    value = value,
+                )
+            }
+
+            copy(customFields = fields)
+        }
+    }
+
+    fun removeCustomFieldValue(key: String) {
+        val normalizedKey = normalizeCustomTagKey(key) ?: return
+
+        updateTag {
+            copy(
+                customFields = customFields.filterNot { it.key.equals(normalizedKey, ignoreCase = true) }
+            )
+        }
+    }
+
+    fun revertCustomField(key: String) {
+        val normalizedKey = normalizeCustomTagKey(key) ?: return
+        val original = _uiState.value.originalTagData
+            ?.customFields
+            .orEmpty()
+            .firstOrNull { it.key.equals(normalizedKey, ignoreCase = true) }
+            ?.copy(key = normalizedKey)
+
+        updateTag {
+            val fields = customFields
+                .filterNot { it.key.equals(normalizedKey, ignoreCase = true) }
+                .toMutableList()
+
+            if (original != null) {
+                fields += original
+            }
+
+            copy(customFields = fields)
+        }
+    }
+
+    fun addCustomFieldAndShow(key: String, value: String) {
+        val normalizedKey = normalizeCustomTagKey(key) ?: return
+
+        viewModelScope.launch {
+            customTagSettingsRepository.addVisibleKey(normalizedKey)
+        }
+
+        updateCustomFieldValue(normalizedKey, value)
+    }
+
+    private fun normalizeCustomTagKey(input: String): String? {
+        val key = input.trim()
+        return when {
+            key.isBlank() -> null
+            key.length > 64 -> null
+            key.any { it == '\n' || it == '\r' } -> null
+            else -> key.uppercase(Locale.ROOT)
+        }
+    }
     /**
      * 打开弹窗前准备：拍快照，并重置累计偏移量
      */
@@ -264,6 +357,7 @@ class EditMetadataViewModel(
             val current = state.editingTagData ?: AudioTagData()
 
             if (result.lyricsOnly) {
+                lyricsFormatConversionSession = null
                 return@update state.copy(
                     isEditing = true,
                     editingTagData = current.copy(
@@ -303,6 +397,9 @@ class EditMetadataViewModel(
                 picUrl = result.picUrl?.takeIf { it.isNotBlank() } ?: current.picUrl,
                 comment = processedFields["subtitle"]?.takeIf { it.isNotBlank() } ?: current.comment,
             )
+            if (!result.lyrics.isNullOrBlank()) {
+                lyricsFormatConversionSession = null
+            }
             val metadataTagData = currentSong?.let { song ->
                 if (result.pluginId.isBlank()) {
                     AudioTagData()
@@ -687,7 +784,6 @@ class EditMetadataViewModel(
             } else {
                 base.replayGainReferenceLoudness
             },
-            customFields = if (visible("custom_tags.custom_tags")) customFields else base.customFields,
             lyrics = if (visible("lyrics.lyrics")) lyrics else base.lyrics,
             pictures = if (visible("cover.picture")) pictures else base.pictures,
             picUrl = if (visible("cover.picture")) picUrl else base.picUrl,
@@ -1019,6 +1115,7 @@ class EditMetadataViewModel(
                 }
 
                 if (!lyrics.isNullOrBlank()) {
+                    lyricsFormatConversionSession = null
                     updateTag { copy(lyrics = lyrics) }
                     _uiState.update { it.copy(importLyricsResult = true) }
                     Log.d(TAG, "歌词导入成功")
@@ -1056,6 +1153,7 @@ class EditMetadataViewModel(
         if (currentLyrics.isBlank()) return
 
         val convertedLyrics = LyricEncoder.convertLyricsText(currentLyrics, conversionMode)
+        lyricsFormatConversionSession = null
         updateTag { copy(lyrics = convertedLyrics) }
     }
 
@@ -1069,22 +1167,21 @@ class EditMetadataViewModel(
 
         viewModelScope.launch {
             try {
-                val lyricsResult = LyricDecoder.decode(currentLyrics)
+                val session = getOrCreateLyricsFormatConversionSession(currentLyrics)
                     ?: return@launch
-                if (lyricsResult.original.isEmpty()) return@launch
 
-                // 3. 配置渲染参数
-                val config = LyricRenderConfig(
-                    format = targetFormat,
-                    conversionMode = ConversionMode.NONE,
-                    showTranslation = lyricsResult.translated != null,
-                    showRomanization = lyricsResult.romanization != null,
-                    removeEmptyLines = true,
-                    onlyTranslationIfAvailable = false
-                )
+                val converted = if (targetFormat == session.sourceFormat) {
+                    session.sourceLyrics
+                } else {
+                    LyricsDocumentPipeline.process(
+                        raw = session.sourceLyrics,
+                        sourceFormat = session.sourceFormat,
+                        targetFormat = targetFormat,
+                        removeEmptyLines = true
+                    ) ?: convertLyricsFormatFromCurrent(currentLyrics, targetFormat) ?: return@launch
+                }
 
-                // 4. 编码：Model → String
-                val converted = LyricEncoder.encode(lyricsResult, config)
+                lyricsFormatConversionSession = session.copy(lastRenderedLyrics = converted)
                 updateTag { copy(lyrics = converted) }
             } catch (e: Exception) {
                 Log.e(TAG, "歌词格式转换失败", e)
@@ -1095,6 +1192,42 @@ class EditMetadataViewModel(
                 )
             }
         }
+    }
+
+    private fun getOrCreateLyricsFormatConversionSession(
+        currentLyrics: String
+    ): LyricsFormatConversionSession? {
+        lyricsFormatConversionSession
+            ?.takeIf { it.lastRenderedLyrics == currentLyrics }
+            ?.let { return it }
+
+        val sourceFormat = LyricDecoder.detectFormat(currentLyrics) ?: return null
+        return LyricsFormatConversionSession(
+            sourceFormat = sourceFormat,
+            sourceLyrics = currentLyrics,
+            lastRenderedLyrics = currentLyrics
+        ).also {
+            lyricsFormatConversionSession = it
+        }
+    }
+
+    private fun convertLyricsFormatFromCurrent(
+        currentLyrics: String,
+        targetFormat: LyricFormat
+    ): String? {
+        val lyricsResult = LyricDecoder.decode(currentLyrics) ?: return null
+        if (lyricsResult.original.isEmpty()) return null
+
+        val config = LyricRenderConfig(
+            format = targetFormat,
+            conversionMode = ConversionMode.NONE,
+            showTranslation = lyricsResult.translated != null,
+            showRomanization = lyricsResult.romanization != null,
+            removeEmptyLines = true,
+            onlyTranslationIfAvailable = false
+        )
+
+        return LyricEncoder.encode(lyricsResult, config).takeIf { it.isNotBlank() }
     }
 
     fun clearImportLyricsStatus() {
