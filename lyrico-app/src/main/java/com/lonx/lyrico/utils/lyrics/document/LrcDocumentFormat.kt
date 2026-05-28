@@ -56,6 +56,10 @@ object EnhancedLrcWriter : LyricsFormatWriter {
 
         original.lines.forEach { line ->
             val start = line.startMs ?: return@forEach
+            if (line.words.size <= 1) {
+                appendLine(builder, line)
+                return@forEach
+            }
             builder.append("[")
                 .append(LyricFormatter.formatTimestamp(start))
                 .append("]")
@@ -66,6 +70,12 @@ object EnhancedLrcWriter : LyricsFormatWriter {
                         .append(LyricFormatter.formatTimestamp(wordStart))
                         .append(">")
                         .append(word.text)
+                }
+                val lineEnd = line.words.lastOrNull()?.endMs ?: line.endMs
+                if (lineEnd != null) {
+                    builder.append("<")
+                        .append(LyricFormatter.formatTimestamp(lineEnd))
+                        .append(">")
                 }
             } else {
                 builder.append(line.text)
@@ -83,9 +93,10 @@ object VerbatimLrcWriter : LyricsFormatWriter {
         val builder = StringBuilder()
         appendTags(builder, document.metadata)
         val original = document.tracks.firstOrNull { it.type == LyricsTrackType.Original } ?: return builder.toString().trim()
+        val isWordLevel = original.lines.any { it.words.size > 1 }
 
         original.lines.forEach { line ->
-            if (line.words.isNotEmpty()) {
+            if (isWordLevel && line.words.isNotEmpty()) {
                 line.words.forEachIndexed { index, word ->
                     val wordStart = word.startMs ?: line.startMs ?: return@forEachIndexed
                     builder.append("[")
