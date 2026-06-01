@@ -2,17 +2,11 @@ package com.lonx.lyrico.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.lonx.lyrico.data.model.plugin.PluginCapability
-import com.lonx.lyrico.data.model.metadata.MetadataFieldTarget
 import com.lonx.lyrico.data.model.plugin.PluginConfigField
 import com.lonx.lyrico.data.model.plugin.PluginConfigFieldType
-import com.lonx.lyrico.data.model.plugin.PluginFieldProcessConfig
-import com.lonx.lyrico.data.model.plugin.PluginMetadataField
-import com.lonx.lyrico.data.repository.PluginFieldProcessConfigRepository
 import com.lonx.lyrico.data.repository.SettingsRepository
 import com.lonx.lyrico.plugin.source.SearchSourceProvider
 import com.lonx.lyrico.utils.isSatisfied
-import com.lonx.lyrico.data.model.lyrics.SearchSource
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -22,11 +16,9 @@ import kotlinx.coroutines.launch
 data class SearchSourceConfigUiState(
     val pluginId: String = "",
     val title: String = "",
-    val capabilities: Set<PluginCapability> = emptySet(),
     val configFields: List<PluginConfigField> = emptyList(),
-    val fieldProcessFields: List<PluginMetadataField> = emptyList(),
     val values: Map<String, String> = emptyMap(),
-    val fieldProcessConfig: PluginFieldProcessConfig? = null,
+    val pluginEnabled: Boolean = true,
     val validationErrors: Map<String, String> = emptyMap(),
     val isLoading: Boolean = true,
     val saved: Boolean = false,
@@ -35,7 +27,6 @@ data class SearchSourceConfigUiState(
 
 class SearchSourceConfigViewModel(
     private val settingsRepository: SettingsRepository,
-    private val pluginFieldProcessConfigRepository: PluginFieldProcessConfigRepository,
     private val searchSourceProvider: SearchSourceProvider
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(SearchSourceConfigUiState())
@@ -43,40 +34,26 @@ class SearchSourceConfigViewModel(
 
     fun load(pluginId: String) {
         viewModelScope.launch {
-            val allSources = searchSourceProvider.getAllSources()
-            val sourceImpl = findSource(pluginId, allSources)
-            if (sourceImpl == null) {
+            val sourceWithState = searchSourceProvider.getSourceWithState(pluginId)
+            if (sourceWithState == null) {
                 _uiState.update {
                     it.copy(isLoading = false, errorMessage = "无效的搜索源")
                 }
                 return@launch
             }
+            val sourceImpl = sourceWithState.source
             val fields = sourceImpl.configFields
             val valueFields = fields.filter { it.type != PluginConfigFieldType.MARKDOWN }
             val defaults = valueFields.associate { it.key to it.defaultValue }
             val saved = settingsRepository.getSourceSettings(sourceImpl.id).values
-            val fieldProcessConfig = pluginFieldProcessConfigRepository.getConfig(sourceImpl.id)
-            val fieldProcessFields = if (PluginCapability.GET_LYRICS in sourceImpl.capabilities) {
-                listOf(
-                    PluginMetadataField(
-                        key = "lyrics",
-                        title = "歌词",
-                        defaultTarget = MetadataFieldTarget.LYRICS
-                    )
-                )
-            } else {
-                emptyList()
-            }
 
             _uiState.update {
                 it.copy(
                     pluginId = sourceImpl.id,
                     title = sourceImpl.name,
-                    capabilities = sourceImpl.capabilities,
                     configFields = fields,
-                    fieldProcessFields = fieldProcessFields,
                     values = defaults + saved,
-                    fieldProcessConfig = fieldProcessConfig,
+                    pluginEnabled = sourceWithState.enabled,
                     validationErrors = emptyMap(),
                     isLoading = false,
                     saved = false,
@@ -91,17 +68,6 @@ class SearchSourceConfigViewModel(
             it.copy(
                 values = it.values + (key to value),
                 validationErrors = it.validationErrors - key,
-                saved = false
-            )
-        }
-    }
-
-    fun updateFieldProcessConfig(config: PluginFieldProcessConfig) {
-        _uiState.update {
-            it.copy(
-                fieldProcessConfig = config.copy(
-                    pluginId = config.pluginId.ifBlank { it.pluginId }
-                ),
                 saved = false
             )
         }
@@ -133,16 +99,7 @@ class SearchSourceConfigViewModel(
                 pluginId,
                 state.values.filterKeys { it in valueFieldKeys }
             )
-            state.fieldProcessConfig?.let { config ->
-                pluginFieldProcessConfigRepository.updateConfig(
-                    config.copy(pluginId = config.pluginId.ifBlank { pluginId })
-                )
-            }
             _uiState.update { it.copy(saved = true, validationErrors = emptyMap()) }
         }
-    }
-
-    private fun findSource(pluginId: String, sources: List<SearchSource>): SearchSource? {
-        return sources.firstOrNull { searchSource -> searchSource.id == pluginId }
     }
 }

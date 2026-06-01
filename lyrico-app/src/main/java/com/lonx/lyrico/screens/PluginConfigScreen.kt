@@ -15,8 +15,6 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -27,7 +25,6 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -46,17 +43,10 @@ import androidx.compose.ui.unit.sp
 import com.lonx.lyrico.R
 import com.lonx.lyrico.data.model.metadata.MetadataFieldTarget
 import com.lonx.lyrico.data.model.metadata.MetadataWriteMode
-import com.lonx.lyrico.data.model.plugin.PluginCapability
-import com.lonx.lyrico.data.model.plugin.FieldProcessRule
-import com.lonx.lyrico.data.model.plugin.FieldScriptConversionMode
-import com.lonx.lyrico.data.model.plugin.FollowGlobalBooleanMode
 import com.lonx.lyrico.data.model.plugin.PluginConfigField
 import com.lonx.lyrico.data.model.plugin.PluginConfigFieldType
-import com.lonx.lyrico.data.model.plugin.PluginFieldProcessConfig
-import com.lonx.lyrico.data.model.plugin.PluginFieldValueType
 import com.lonx.lyrico.data.model.plugin.PluginMetadataField
 import com.lonx.lyrico.data.model.plugin.PluginMetadataFieldWriteRule
-import com.lonx.lyrico.data.model.plugin.valueType
 import com.lonx.lyrico.ui.components.scaffoldTopHorizontalPadding
 import com.lonx.lyrico.utils.isSatisfied
 import com.lonx.lyrico.viewmodel.SearchSourceConfigViewModel
@@ -64,7 +54,6 @@ import com.ramcosta.composedestinations.annotation.Destination
 import com.ramcosta.composedestinations.annotation.RootGraph
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
 import dev.jeziellago.compose.markdowntext.MarkdownText
-import kotlinx.coroutines.launch
 import org.koin.androidx.compose.koinViewModel
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Card
@@ -78,7 +67,6 @@ import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.ScrollBehavior
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.SmallTopAppBar
-import top.yukonga.miuix.kmp.basic.TabRowWithContour
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
@@ -104,24 +92,6 @@ fun PluginConfigScreen(
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
     val topAppBarScrollBehavior = MiuixScrollBehavior()
-    val scope = rememberCoroutineScope()
-
-    val tabs = remember(uiState.capabilities, uiState.fieldProcessFields) {
-        buildList {
-            add(PluginConfigTab.Basic)
-            if (uiState.fieldProcessFields.isNotEmpty()) {
-                add(PluginConfigTab.FieldProcess)
-            }
-        }
-    }
-    val pagerState = rememberPagerState(pageCount = { tabs.size.coerceAtLeast(1) })
-
-    var editingProcessFieldKey by rememberSaveable {
-        mutableStateOf<String?>(null)
-    }
-    var showFieldProcessRuleSheet by rememberSaveable {
-        mutableStateOf(false)
-    }
 
     val requiredMessage = stringResource(R.string.source_config_required_error)
 
@@ -136,31 +106,13 @@ fun PluginConfigScreen(
         }
     }
 
-    LaunchedEffect(tabs.size) {
-        if (pagerState.currentPage >= tabs.size && tabs.isNotEmpty()) {
-            pagerState.scrollToPage(tabs.lastIndex)
-        }
-    }
-
     val title = uiState.title.ifBlank { stringResource(R.string.plugin_config_title) }
-
-    val editingProcessField = remember(editingProcessFieldKey, uiState.fieldProcessFields) {
-        uiState.fieldProcessFields.firstOrNull { it.key == editingProcessFieldKey }
-    }
 
     val hasConfigContent by remember {
         derivedStateOf {
             uiState.errorMessage == null &&
                     !uiState.isLoading &&
                     uiState.configFields.any { it.dependency.isSatisfied(uiState.values) }
-        }
-    }
-
-    val hasFieldProcessContent by remember {
-        derivedStateOf {
-            uiState.errorMessage == null &&
-                    !uiState.isLoading &&
-                    uiState.fieldProcessConfig != null
         }
     }
 
@@ -210,24 +162,7 @@ fun PluginConfigScreen(
                 return@Scaffold
             }
 
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp)
-                    .padding(bottom = 8.dp)
-            ) {
-                TabRowWithContour(
-                    tabs = tabs.map { stringResource(it.labelRes) },
-                    selectedTabIndex = pagerState.currentPage,
-                    onTabSelected = { index ->
-                        scope.launch {
-                            pagerState.animateScrollToPage(index)
-                        }
-                    }
-                )
-            }
-
-            if (!hasConfigContent && !hasFieldProcessContent) {
+            if (!hasConfigContent) {
                 Text(
                     text = stringResource(R.string.source_config_empty),
                     modifier = Modifier
@@ -239,353 +174,38 @@ fun PluginConfigScreen(
                 return@Scaffold
             }
 
-            HorizontalPager(
-                state = pagerState,
-                modifier = Modifier.fillMaxSize()
-            ) { page ->
-                when (tabs.getOrNull(page) ?: PluginConfigTab.Basic) {
-                    PluginConfigTab.Basic -> PluginBasicConfigTab(
-                        fields = uiState.configFields,
-                        values = uiState.values,
-                        validationErrors = uiState.validationErrors,
-                        hasContent = hasConfigContent,
-                        topAppBarScrollBehavior = topAppBarScrollBehavior,
-                        onValueChange = viewModel::updateValue
-                    )
-
-                    PluginConfigTab.FieldProcess -> PluginFieldProcessConfigTab(
-                        metadataFields = uiState.fieldProcessFields,
-                        metadataRules = emptyList<PluginMetadataFieldWriteRule>(),
-                        config = uiState.fieldProcessConfig ?: PluginFieldProcessConfig(uiState.pluginId),
-                        hasContent = uiState.fieldProcessConfig != null,
-                        topAppBarScrollBehavior = topAppBarScrollBehavior,
-                        onEditField = { fieldKey ->
-                            editingProcessFieldKey = fieldKey
-                            showFieldProcessRuleSheet = true
-                        },
-                        onConfigChange = viewModel::updateFieldProcessConfig
-                    )
-
-                    PluginConfigTab.Metadata -> Unit
-                }
-            }
-        }
-    }
-
-    FieldProcessRuleBottomSheet(
-        show = showFieldProcessRuleSheet,
-        field = editingProcessField,
-        writeRule = null,
-        config = uiState.fieldProcessConfig,
-        onDismissRequest = {
-            showFieldProcessRuleSheet = false
-        },
-        onDismissFinished = {
-            editingProcessFieldKey = null
-        },
-        onConfigChanged = viewModel::updateFieldProcessConfig
-    )
-}
-
-@Composable
-private fun PluginBasicConfigTab(
-    fields: List<PluginConfigField>,
-    values: Map<String, String>,
-    validationErrors: Map<String, String>,
-    hasContent: Boolean,
-    topAppBarScrollBehavior: ScrollBehavior,
-    onValueChange: (String, String) -> Unit
-) {
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .scrollEndHaptic()
-            .overScrollVertical()
-            .nestedScroll(topAppBarScrollBehavior.nestedScrollConnection),
-        contentPadding = PaddingValues(bottom = 12.dp),
-        overscrollEffect = null
-    ) {
-        if (!hasContent) {
-            item("empty_config") {
-                Text(
-                    text = stringResource(R.string.source_config_empty),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(12.dp),
-                    textAlign = TextAlign.Center,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantActions
-                )
-            }
-            return@LazyColumn
-        }
-
-        pluginConfigFormItems(
-            fields = fields,
-            values = values,
-            validationErrors = validationErrors,
-            onValueChange = onValueChange
-        )
-    }
-}
-
-@Composable
-private fun PluginMetadataTab(
-    pluginId: String,
-    metadataFields: List<PluginMetadataField>,
-    metadataRules: List<PluginMetadataFieldWriteRule>,
-    hasContent: Boolean,
-    topAppBarScrollBehavior: ScrollBehavior,
-    onDisableAll: () -> Unit,
-    onSupplementAll: () -> Unit,
-    onOverwriteAll: () -> Unit,
-    onEditField: (String) -> Unit
-) {
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .scrollEndHaptic()
-            .overScrollVertical()
-            .nestedScroll(topAppBarScrollBehavior.nestedScrollConnection),
-        contentPadding = PaddingValues(bottom = 12.dp),
-        overscrollEffect = null
-    ) {
-        if (!hasContent) {
-            item("empty_metadata") {
-                Text(
-                    text = stringResource(R.string.source_config_empty),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(12.dp),
-                    textAlign = TextAlign.Center,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantActions
-                )
-            }
-            return@LazyColumn
-        }
-
-        item("metadata_batch_actions") {
-            MetadataRuleBatchActions(
-                onDisableAll = onDisableAll,
-                onSupplementAll = onSupplementAll,
-                onOverwriteAll = onOverwriteAll
-            )
-        }
-
-        metadataRuleItems(
-            pluginId = pluginId,
-            metadataFields = metadataFields,
-            metadataRules = metadataRules,
-            onEditField = onEditField
-        )
-    }
-}
-
-@Composable
-private fun PluginFieldProcessConfigTab(
-    metadataFields: List<PluginMetadataField>,
-    metadataRules: List<PluginMetadataFieldWriteRule>,
-    config: PluginFieldProcessConfig,
-    hasContent: Boolean,
-    topAppBarScrollBehavior: ScrollBehavior,
-    onEditField: (String) -> Unit,
-    onConfigChange: (PluginFieldProcessConfig) -> Unit
-) {
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .scrollEndHaptic()
-            .overScrollVertical()
-            .nestedScroll(topAppBarScrollBehavior.nestedScrollConnection),
-        contentPadding = PaddingValues(bottom = 12.dp),
-        overscrollEffect = null
-    ) {
-        if (!hasContent) {
-            item("empty_lyrics_config") {
-                Text(
-                    text = stringResource(R.string.source_config_empty),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(12.dp),
-                    textAlign = TextAlign.Center,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantActions
-                )
-            }
-            return@LazyColumn
-        }
-
-        if (metadataFields.isNotEmpty()) {
-            item("field_process_fields_title") {
-                SmallTitle(text = stringResource(R.string.plugin_field_process_field_rules))
-            }
-
-            item("field_process_fields_card") {
-                val rulesByKey = metadataRules.associateBy { it.normalizedKey }
+            if (!uiState.pluginEnabled) {
                 Card(
                     modifier = Modifier
+                        .fillMaxWidth()
                         .padding(horizontal = 12.dp)
-                        .padding(bottom = 12.dp)
+                        .padding(bottom = 8.dp),
+                    colors = CardDefaults.defaultColors(
+                        color = MiuixTheme.colorScheme.secondaryContainer
+                    )
                 ) {
-                    metadataFields.forEach { field ->
-                        FieldProcessRulePreference(
-                            field = field,
-                            valueType = rulesByKey[field.key]?.target?.valueType() ?: inferFieldValueType(field.key),
-                            isConfigured = config.fieldRules.containsKey(field.key),
-                            onClick = { onEditField(field.key) }
-                        )
-                    }
+                    Text(
+                        text = stringResource(R.string.source_config_plugin_disabled_hint),
+                        modifier = Modifier.padding(16.dp),
+                        color = MiuixTheme.colorScheme.onSurfaceVariantActions,
+                        fontSize = 14.sp
+                    )
                 }
             }
-        }
-    }
-}
 
-@Composable
-private fun FieldProcessRulePreference(
-    field: PluginMetadataField,
-    valueType: PluginFieldValueType,
-    isConfigured: Boolean,
-    onClick: () -> Unit
-) {
-    BasicComponent(
-        modifier = Modifier.fillMaxWidth(),
-        insideMargin = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-        onClick = onClick,
-        endActions = {
-            Text(
-                text = stringResource(
-                    if (isConfigured) {
-                        R.string.plugin_field_process_configured
-                    } else {
-                        R.string.plugin_field_process_initial
-                    }
-                ),
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Medium,
-                color = if (isConfigured) {
-                    MiuixTheme.colorScheme.primary
-                } else {
-                    MiuixTheme.colorScheme.onSurfaceVariantActions
-                },
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-    ) {
-        Column(modifier = Modifier.padding(end = 8.dp)) {
-            Text(
-                text = field.title.ifBlank { field.key },
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(modifier = Modifier.height(3.dp))
-            Text(
-                text = valueType.name.lowercase(),
-                fontSize = 13.sp,
-                color = MiuixTheme.colorScheme.onSurfaceVariantActions,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-    }
-}
-
-@Composable
-private fun FieldProcessRulePreferences(
-    rule: FieldProcessRule,
-    valueType: PluginFieldValueType?,
-    onRuleChange: (FieldProcessRule) -> Unit
-) {
-    if (valueType == null || valueType.canConvertScript()) {
-        WindowDropdownPreference(
-            title = stringResource(R.string.plugin_field_process_script_conversion),
-            summary = stringResource(R.string.plugin_field_process_script_conversion_summary),
-            items = FieldScriptConversionMode.entries.map { stringResource(it.labelRes) },
-            selectedIndex = FieldScriptConversionMode.entries.indexOf(rule.scriptConversion).coerceAtLeast(0),
-            onSelectedIndexChange = { index ->
-                FieldScriptConversionMode.entries.getOrNull(index)?.let { mode ->
-                    onRuleChange(rule.copy(scriptConversion = mode))
-                }
-            }
-        )
-    }
-
-    if (valueType == null || valueType.canTrim()) {
-        FollowGlobalBooleanPreference(
-            title = stringResource(R.string.plugin_field_process_trim),
-            summary = stringResource(R.string.plugin_field_process_trim_summary),
-            value = rule.trim,
-            onValueChange = { mode -> onRuleChange(rule.copy(trim = mode)) }
-        )
-    }
-
-    if (valueType == null || valueType.canNormalizeWhitespace()) {
-        FollowGlobalBooleanPreference(
-            title = stringResource(R.string.plugin_field_process_normalize_whitespace),
-            summary = stringResource(R.string.plugin_field_process_normalize_whitespace_summary),
-            value = rule.normalizeWhitespace,
-            onValueChange = { mode -> onRuleChange(rule.copy(normalizeWhitespace = mode)) }
-        )
-    }
-
-    if (valueType == null || valueType.canRemoveEmptyLines()) {
-        FollowGlobalBooleanPreference(
-            title = stringResource(R.string.plugin_field_process_remove_empty_lines),
-            summary = stringResource(R.string.plugin_field_process_remove_empty_lines_summary),
-            value = rule.removeEmptyLines,
-            onValueChange = { mode -> onRuleChange(rule.copy(removeEmptyLines = mode)) }
-        )
-    }
-
-}
-
-@Composable
-private fun FieldProcessRuleBottomSheet(
-    show: Boolean,
-    field: PluginMetadataField?,
-    writeRule: PluginMetadataFieldWriteRule?,
-    config: PluginFieldProcessConfig?,
-    onDismissRequest: () -> Unit,
-    onDismissFinished: () -> Unit,
-    onConfigChanged: (PluginFieldProcessConfig) -> Unit
-) {
-    WindowBottomSheet(
-        show = show,
-        onDismissRequest = onDismissRequest,
-        onDismissFinished = onDismissFinished
-    ) {
-        val currentField = field ?: return@WindowBottomSheet
-        val currentConfig = config ?: return@WindowBottomSheet
-        val fieldRule = currentConfig.fieldRules[currentField.key] ?: FieldProcessRule()
-        val valueType = writeRule?.target?.valueType() ?: inferFieldValueType(currentField.key)
-
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 32.dp)
-                .verticalScroll(rememberScrollState())
-        ) {
-            SmallTitle(
-                text = currentField.title.ifBlank { currentField.key },
-                insideMargin = PaddingValues(4.dp)
-            )
-            Card(
-                modifier = Modifier.padding(bottom = 12.dp),
-                colors = CardDefaults.defaultColors(
-                    color = MiuixTheme.colorScheme.secondaryContainer,
-                )
+            LazyColumn(
+                modifier = Modifier
+                    .scrollEndHaptic()
+                    .overScrollVertical()
+                    .nestedScroll(topAppBarScrollBehavior.nestedScrollConnection),
+                contentPadding = PaddingValues(bottom = 12.dp),
+                overscrollEffect = null
             ) {
-                FieldProcessRulePreferences(
-                    rule = fieldRule,
-                    valueType = valueType,
-                    onRuleChange = { rule ->
-                        onConfigChanged(
-                            currentConfig.copy(
-                                fieldRules = currentConfig.fieldRules + (currentField.key to rule)
-                            )
-                        )
-                    }
+                pluginConfigFormItems(
+                    fields = uiState.configFields,
+                    values = uiState.values,
+                    validationErrors = uiState.validationErrors,
+                    onValueChange = viewModel::updateValue
                 )
             }
         }
@@ -819,368 +439,5 @@ private fun PluginConfigFormItem(
     }
 }
 
-private fun LazyListScope.metadataRuleItems(
-    pluginId: String,
-    metadataFields: List<PluginMetadataField>,
-    metadataRules: List<PluginMetadataFieldWriteRule>,
-    onEditField: (String) -> Unit
-) {
-    if (metadataFields.isEmpty()) return
-
-    val rulesByKey = metadataRules
-        .filter { it.pluginId == pluginId }
-        .associateBy { it.normalizedKey }
-
-    val grouped = metadataFields.groupBy { field ->
-        field.group.ifBlank { DEFAULT_METADATA_GROUP }
-    }
-
-    item("metadata_title") {
-        SmallTitle(text = stringResource(R.string.source_config_metadata_rules))
-    }
-
-    grouped.forEach { (group, fields) ->
-        val visibleFields = fields.filter { field ->
-            rulesByKey.containsKey(field.key)
-        }
-
-        if (visibleFields.isEmpty()) {
-            return@forEach
-        }
-
-        item("metadata_group_title_$group") {
-            SmallTitle(text = group)
-        }
-
-        item("metadata_card_$group") {
-            Card(
-                modifier = Modifier
-                    .padding(horizontal = 12.dp)
-                    .padding(bottom = 12.dp)
-            ) {
-                Column {
-                    visibleFields.forEach { field ->
-                        val rule = rulesByKey[field.key] ?: return@forEach
-                        MetadataRulePreference(
-                            field = field,
-                            rule = rule,
-                            onClick = {
-                                onEditField(field.key)
-                            }
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun MetadataRuleBatchActions(
-    onDisableAll: () -> Unit,
-    onSupplementAll: () -> Unit,
-    onOverwriteAll: () -> Unit
-) {
-    Card(
-        modifier = Modifier
-            .padding(horizontal = 12.dp)
-            .padding(bottom = 12.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
-        ) {
-            Text(
-                text = stringResource(R.string.source_config_batch_actions_summary),
-                fontSize = 13.sp,
-                color = MiuixTheme.colorScheme.onSurfaceVariantActions
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                TextButton(
-                    text = stringResource(R.string.source_config_disable_all),
-                    onClick = onDisableAll,
-                    modifier = Modifier.weight(1f)
-                )
-
-                TextButton(
-                    text = stringResource(R.string.source_config_supplement_all),
-                    onClick = onSupplementAll,
-                    modifier = Modifier.weight(1f)
-                )
-
-                TextButton(
-                    text = stringResource(R.string.source_config_overwrite_all),
-                    onClick = onOverwriteAll,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun FollowGlobalBooleanPreference(
-    title: String,
-    summary: String,
-    value: FollowGlobalBooleanMode,
-    onValueChange: (FollowGlobalBooleanMode) -> Unit
-) {
-    WindowDropdownPreference(
-        title = title,
-        summary = summary,
-        items = FollowGlobalBooleanMode.entries.map { stringResource(it.labelRes) },
-        selectedIndex = FollowGlobalBooleanMode.entries.indexOf(value).coerceAtLeast(0),
-        onSelectedIndexChange = { index ->
-            FollowGlobalBooleanMode.entries.getOrNull(index)?.let(onValueChange)
-        }
-    )
-}
-
-@Composable
-private fun MetadataRulePreference(
-    field: PluginMetadataField,
-    rule: PluginMetadataFieldWriteRule,
-    onClick: () -> Unit
-) {
-    BasicComponent(
-        modifier = Modifier.fillMaxWidth(),
-        insideMargin = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-        onClick = onClick,
-        endActions = {
-            Column(
-                horizontalAlignment = Alignment.End,
-                modifier = Modifier.padding(start = 12.dp)
-            ) {
-                Text(
-                    text = stringResource(rule.mode.labelRes),
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = when (rule.mode) {
-                        MetadataWriteMode.DISABLED ->
-                            MiuixTheme.colorScheme.onSurfaceVariantActions
-                        MetadataWriteMode.SUPPLEMENT,
-                        MetadataWriteMode.OVERWRITE ->
-                            MiuixTheme.colorScheme.primary
-                    },
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-
-                Spacer(modifier = Modifier.height(3.dp))
-
-                Text(
-                    text = stringResource(rule.target.labelRes),
-                    fontSize = 12.sp,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantActions,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-        }
-    ) {
-        Column(
-            modifier = Modifier.padding(end = 8.dp)
-        ) {
-            Text(
-                text = field.title.ifBlank { field.key },
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-
-            Spacer(modifier = Modifier.height(3.dp))
-
-            Text(
-                text = field.summary.ifBlank { field.key },
-                fontSize = 13.sp,
-                color = MiuixTheme.colorScheme.onSurfaceVariantActions,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-    }
-}
-
-@Composable
-private fun MetadataRuleBottomSheet(
-    show: Boolean,
-    field: PluginMetadataField?,
-    rule: PluginMetadataFieldWriteRule?,
-    onDismissRequest: () -> Unit,
-    onDismissFinished: () -> Unit,
-    onRuleChanged: (PluginMetadataFieldWriteRule) -> Unit
-) {
-    WindowBottomSheet(
-        show = show,
-        onDismissRequest = onDismissRequest,
-        onDismissFinished = onDismissFinished
-    ) {
-        val currentField = field ?: return@WindowBottomSheet
-        val currentRule = rule ?: return@WindowBottomSheet
-
-        val targetCandidates = remember(currentField) {
-            currentField.targetOptions
-                .takeIf { it.isNotEmpty() }
-                ?: listOf(currentField.defaultTarget)
-        }
-
-        val selectedModeIndex = MetadataWriteMode.entries
-            .indexOf(currentRule.mode)
-            .coerceAtLeast(0)
-
-        val selectedTargetIndex = targetCandidates
-            .indexOf(currentRule.target)
-            .coerceAtLeast(0)
-
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 32.dp)
-                .verticalScroll(rememberScrollState()),
-        ) {
-            SmallTitle(
-                text = currentField.title,
-                insideMargin = PaddingValues(4.dp)
-            )
-            Card(
-                modifier = Modifier.padding(bottom = 12.dp),
-                colors = CardDefaults.defaultColors(
-                    color = MiuixTheme.colorScheme.secondaryContainer,
-                )
-            ) {
-                WindowDropdownPreference(
-                    title = stringResource(R.string.source_config_write_mode),
-                    items = MetadataWriteMode.entries.map { stringResource(it.labelRes) },
-                    selectedIndex = selectedModeIndex,
-                    onSelectedIndexChange = { index ->
-                        MetadataWriteMode.entries.getOrNull(index)?.let { mode ->
-                            onRuleChanged(
-                                currentRule.copy(
-                                    fieldKey = currentRule.normalizedKey,
-                                    mode = mode
-                                )
-                            )
-                        }
-                    }
-                )
-
-                WindowDropdownPreference(
-                    title = stringResource(R.string.source_config_write_target),
-                    items = targetCandidates.map { stringResource(it.labelRes) },
-                    selectedIndex = selectedTargetIndex,
-                    enabled = targetCandidates.isNotEmpty(),
-                    onSelectedIndexChange = { index ->
-                        targetCandidates.getOrNull(index)?.let { target ->
-                            onRuleChanged(
-                                currentRule.copy(
-                                    fieldKey = currentRule.normalizedKey,
-                                    target = target,
-                                    customTagKey = if (target == MetadataFieldTarget.CUSTOM) {
-                                        currentRule.customTagKey
-                                    } else {
-                                        null
-                                    }
-                                )
-                            )
-                        }
-                    }
-                )
-
-                AnimatedVisibility(visible = currentRule.target == MetadataFieldTarget.CUSTOM) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 10.dp)
-                    ) {
-                        Text(
-                            text = stringResource(R.string.source_config_custom_tag_key),
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        TextField(
-                            modifier = Modifier.fillMaxWidth(),
-                            value = currentRule.customTagKey.orEmpty(),
-                            maxLines = 1,
-                            onValueChange = { value ->
-                                onRuleChanged(
-                                    currentRule.copy(
-                                        fieldKey = currentRule.normalizedKey,
-                                        customTagKey = value.takeIf { it.isNotBlank() }
-                                    )
-                                )
-                            }
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-private enum class PluginConfigTab(val labelRes: Int) {
-    Basic(R.string.plugin_config_tab_basic),
-    FieldProcess(R.string.plugin_config_tab_field_process),
-    Metadata(R.string.plugin_config_tab_metadata)
-}
-
-private val FollowGlobalBooleanMode.labelRes: Int
-    get() = when (this) {
-        FollowGlobalBooleanMode.FOLLOW_GLOBAL -> R.string.config_follow_global
-        FollowGlobalBooleanMode.ENABLED -> R.string.config_enabled
-        FollowGlobalBooleanMode.DISABLED -> R.string.config_disabled
-    }
-
-private val FieldScriptConversionMode.labelRes: Int
-    get() = when (this) {
-        FieldScriptConversionMode.FOLLOW_GLOBAL -> R.string.config_follow_global
-        FieldScriptConversionMode.DISABLED -> R.string.script_conversion_disabled
-        FieldScriptConversionMode.SIMPLIFIED -> R.string.script_conversion_simplified
-        FieldScriptConversionMode.TRADITIONAL -> R.string.script_conversion_traditional
-    }
-
-private fun inferFieldValueType(key: String): PluginFieldValueType {
-    return when (key) {
-        "artist", "album_artist", "composer", "lyricist" -> PluginFieldValueType.PERSON_LIST
-        "lyrics", "lyric" -> PluginFieldValueType.LYRICS
-        "cover_url", "pic_url", "image_url" -> PluginFieldValueType.IMAGE_URL
-        "track_number", "disc_number", "duration", "rating" -> PluginFieldValueType.NUMBER
-        "date", "year" -> PluginFieldValueType.DATE
-        else -> PluginFieldValueType.TEXT
-    }
-}
-
-private fun PluginFieldValueType.canConvertScript(): Boolean {
-    return this in setOf(
-        PluginFieldValueType.TEXT,
-        PluginFieldValueType.MULTILINE_TEXT,
-        PluginFieldValueType.PERSON_LIST,
-        PluginFieldValueType.LYRICS
-    )
-}
-
-private fun PluginFieldValueType.canTrim(): Boolean {
-    return canConvertScript()
-}
-
-private fun PluginFieldValueType.canNormalizeWhitespace(): Boolean {
-    return canConvertScript()
-}
-
-private fun PluginFieldValueType.canRemoveEmptyLines(): Boolean {
-    return this in setOf(
-        PluginFieldValueType.MULTILINE_TEXT,
-        PluginFieldValueType.LYRICS
-    )
-}
 
 private const val DEFAULT_CONFIG_GROUP = "__basic__"
-private const val DEFAULT_METADATA_GROUP = "extended"
