@@ -2,12 +2,12 @@
 layout: home
 
 hero:
-  name: "Lyrico 文档"
-  text: "本地音乐整理与插件开发"
-  tagline: 管理音乐库、编辑音频元数据、补全歌词封面，并通过插件扩展在线搜索能力
+  name: "Lyrico"
+  text: "安卓音乐标签编辑工具"
+  tagline: 支持编辑音频标签，可使用 JavaScript 插件扩展搜索音频标签
   actions:
     - theme: brand
-      text: 插件开发
+      text: 了解插件
       link: /plugins/
     - theme: alt
       text: GitHub
@@ -20,16 +20,16 @@ features:
   - icon: 🏷️
     title: 元数据编辑
     details: 读取和写入标题、艺术家、专辑、歌词、封面等常见音频标签。
+  - icon: 🔁
+    title: 批量整理
+    details: 批量匹配歌曲信息、补充缺失字段、统一处理歌词和封面。
   - icon: 📝
     title: 歌词与封面
     details: 通过插件搜索歌词、翻译、罗马音和封面，并写入本地音频文件。
   - icon: 🧩
-    title: 插件扩展
+    title: 在线搜索源
     details: 使用 JavaScript 编写搜索源插件，扩展歌曲搜索、歌词获取和封面搜索能力。
   - icon: ⚙️
-    title: 插件配置
-    details: 通过 manifest 声明必要配置项，由应用生成对应配置界面。
-  - icon: 📚
-    title: 开发参考
-    details: 查看插件结构、宿主 API、插件函数、配置项和完整示例等开发资料。
+    title: 灵活配置
+    details: 支持为不同搜索源保存歌词语言、封面尺寸、令牌等运行配置。
 ---
