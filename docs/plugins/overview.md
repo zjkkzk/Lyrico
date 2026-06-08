@@ -45,7 +45,7 @@ Lyrico 插件系统是一个基于 **QuickJS 嵌入式 JavaScript 引擎** 的�
 | `PluginSearchSourceManager` | 缓存所有已启动插件的 ScriptSearchSource 实例 |
 | `ScriptSearchSource` | 包装单个插件的搜索源，管理其 JS 运行时生命周期 |
 | `QuickJsRuntime` | QuickJS 引擎封装，执行 JS 脚本并调用其全局函数 |
-| `QuickJsHostApi` | 实现所有宿主 API（HTTP、加密、编码、压缩等） |
+| `QuickJsHostApi` | 实现所有宿主 API（HTTP、加密、编码、压缩、XML 等） |
 | `PluginJsonParser` | 将插件返回的 JSON 解析为应用内部数据模型 |
 
 ## 完整流程
@@ -175,7 +175,7 @@ Lyrico 插件系统是一个基于 **QuickJS 嵌入式 JavaScript 引擎** 的�
 
 ## 宿主能力总览
 
-插件通过 `globalThis.Platform` 对象访问宿主能力，共 **27 个 API**：
+插件通过 `globalThis.Platform` 对象访问宿主能力，共 **31 个 API**：
 
 | 分类 | API 数量 | 功能 |
 |------|----------|------|
@@ -186,6 +186,7 @@ Lyrico 插件系统是一个基于 **QuickJS 嵌入式 JavaScript 引擎** 的�
 | `bytes` | 2 | XOR 字节运算 |
 | `compression` | 2 | zlib inflate 解压 |
 | `http` | 8 | GET/POST 请求（文本/二进制），新旧两套 API |
+| `xml` | 4 | XML/TTML 查询和改写 |
 | `log` | 3 | debug/warn/error 日志输出 |
 
 详细 API 参考见 [宿主 API 参考](./host-api.md)。
