@@ -12,13 +12,22 @@ class SharedSelectionManager {
     private val _isSelectionMode = MutableStateFlow(false)
     val isSelectionMode: StateFlow<Boolean> = _isSelectionMode.asStateFlow()
 
-    private var swipeAnchorUri: String? = null
+    private val _swipeAnchorUri = MutableStateFlow<String?>(null)
+    val swipeAnchorUri: StateFlow<String?> = _swipeAnchorUri.asStateFlow()
+
+    private var swipeAnchorUriValue: String?
+        get() = _swipeAnchorUri.value
+        set(value) {
+            _swipeAnchorUri.value = value
+        }
 
     fun setUris(uris: Set<String>) {
         _selectedUris.value = uris
-        _isSelectionMode.value = uris.isNotEmpty()
-        if (swipeAnchorUri !in uris) {
-            swipeAnchorUri = null
+        if (uris.isNotEmpty()) {
+            _isSelectionMode.value = true
+        }
+        if (swipeAnchorUriValue !in uris) {
+            swipeAnchorUriValue = null
         }
     }
 
@@ -30,9 +39,8 @@ class SharedSelectionManager {
             _selectedUris.value + uri
         }
         _selectedUris.value = selectedUris
-        _isSelectionMode.value = selectedUris.isNotEmpty()
-        if (swipeAnchorUri !in selectedUris) {
-            swipeAnchorUri = null
+        if (swipeAnchorUriValue !in selectedUris) {
+            swipeAnchorUriValue = null
         }
     }
 
@@ -42,13 +50,13 @@ class SharedSelectionManager {
 
     fun deselectAll() {
         _selectedUris.value = emptySet()
-        swipeAnchorUri = null
+        swipeAnchorUriValue = null
     }
 
     fun exitSelectionMode() {
         _isSelectionMode.value = false
         _selectedUris.value = emptySet()
-        swipeAnchorUri = null
+        swipeAnchorUriValue = null
     }
 
     fun selectSwipeRange(uri: String, visibleUris: List<String>) {
@@ -57,20 +65,20 @@ class SharedSelectionManager {
         if (!_isSelectionMode.value) {
             _isSelectionMode.value = true
             _selectedUris.value = selectedUris + uri
-            swipeAnchorUri = uri
+            swipeAnchorUriValue = uri
             return
         }
 
         if (uri in selectedUris) {
             _selectedUris.value = selectedUris + uri
-            swipeAnchorUri = uri
+            swipeAnchorUriValue = uri
             return
         }
 
-        val anchorUri = swipeAnchorUri
+        val anchorUri = swipeAnchorUriValue
         if (anchorUri == null || anchorUri !in selectedUris) {
             _selectedUris.value = selectedUris + uri
-            swipeAnchorUri = uri
+            swipeAnchorUriValue = uri
             return
         }
 
@@ -78,7 +86,7 @@ class SharedSelectionManager {
         val uriIndex = visibleUris.indexOf(uri)
         if (anchorIndex == -1 || uriIndex == -1) {
             _selectedUris.value = selectedUris + uri
-            swipeAnchorUri = uri
+            swipeAnchorUriValue = uri
             return
         }
 
@@ -86,7 +94,7 @@ class SharedSelectionManager {
         val end = maxOf(anchorIndex, uriIndex)
         _selectedUris.value = selectedUris + visibleUris.subList(start, end + 1)
         _isSelectionMode.value = true
-        swipeAnchorUri = null
+        swipeAnchorUriValue = null
     }
 
     fun replaceUris(uriMapping: Map<String, String>) {
@@ -94,7 +102,7 @@ class SharedSelectionManager {
         _selectedUris.value = _selectedUris.value.map { uri ->
             uriMapping[uri] ?: uri
         }.toSet()
-        swipeAnchorUri = swipeAnchorUri?.let { uriMapping[it] ?: it }
+        swipeAnchorUriValue = swipeAnchorUriValue?.let { uriMapping[it] ?: it }
     }
 
     fun clearAll() {
