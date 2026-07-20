@@ -52,6 +52,7 @@ Use plugins to search online song metadata to fill in title, artist, lyrics, and
 2. Tap the search button (or press Enter). Lyrico queries enabled plugins for matching songs.
 3. Search results are shown under "All" and per-plugin-source tabs.
 4. Tap a search result to view its metadata and lyrics.
+   - By default, only fields containing values are shown. Enable **Show All Search Result Fields** under `Settings` → `Search Settings` to display missing fields as “(empty)”.
 5. Choose an action:
    - **Apply**: Apply both the selected metadata fields and lyrics to the editor.
    - **Lyrics Only**: Apply only the lyrics to the editor.
@@ -93,7 +94,7 @@ Tap "Lyrics Options" to:
 Formatting lyrics cannot generate word-level timings from scratch. If the source lacks word-level timing data, it cannot be converted to a word-timed format.
 :::
 
-Lyric offsets are in milliseconds. Positive values shift everything later; negative values shift everything earlier.
+Enter lyric offsets directly in milliseconds. Positive values shift everything later and negative values shift everything earlier. Only complete integers are applied; clearing the field leaves it empty and does not reset the timeline. Use the reset button on the right to restore an offset of `0`.
 
 ## ReplayGain
 
