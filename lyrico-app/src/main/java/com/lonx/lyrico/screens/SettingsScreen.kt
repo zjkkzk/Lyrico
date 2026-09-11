@@ -43,6 +43,7 @@ import com.lonx.lyrico.BuildConfig
 import com.lonx.lyrico.R
 import com.lonx.lyrico.data.model.ArtistSeparator
 import com.lonx.lyrico.data.model.ConversionMode
+import com.lonx.lyrico.data.model.FloatingBarEffect
 import com.lonx.lyrico.data.model.SearchSourceTabStyle
 import com.lonx.lyrico.data.model.lyrics.LyricFormat
 import com.lonx.lyrico.data.model.lyrics.visibleLyricLineTracks
@@ -126,8 +127,7 @@ fun SettingsScreen(
     val monetEnable = settingsUiState.monetEnable
     val floatingBottomBarEnabled = settingsUiState.floatingBottomBarEnabled
     val barBlurEnabled = settingsUiState.barBlurEnabled
-    val floatingBarBlurEnabled = settingsUiState.floatingBarBlurEnabled
-    val liquidGlassEnabled = settingsUiState.liquidGlassEnabled
+    val floatingBarEffect = settingsUiState.floatingBarEffect
     val currentKeyColor = settingsUiState.keyColor
     val translationEnabled = settingsUiState.translationEnabled
     val onlyTranslationIfAvailable = settingsUiState.onlyTranslationIfAvailable
@@ -172,6 +172,8 @@ fun SettingsScreen(
     val searchSourceTabStyleItems = SearchSourceTabStyle.entries.map { stringResource(it.labelRes) }
     val selectedSearchSourceTabStyleIndex =
         SearchSourceTabStyle.entries.indexOf(searchSourceTabStyle).coerceAtLeast(0)
+
+    val floatingBarEffectItems = FloatingBarEffect.entries.map { stringResource(it.labelRes) }
 
     val context = LocalContext.current
 
@@ -399,20 +401,16 @@ fun SettingsScreen(
                         onCheckedChange = { settingsViewModel.setFloatingBottomBarEnabled(it) }
                     )
                     AnimatedVisibility(visible = floatingBottomBarEnabled) {
-                        Column {
-                            SwitchPreference(
-                                title = stringResource(R.string.floating_bar_blur),
-                                summary = stringResource(R.string.floating_bar_blur_summary),
-                                checked = floatingBarBlurEnabled,
-                                onCheckedChange = settingsViewModel::setFloatingBarBlurEnabled,
-                            )
-                            SwitchPreference(
-                                title = stringResource(R.string.liquid_glass),
-                                summary = stringResource(R.string.liquid_glass_summary),
-                                checked = liquidGlassEnabled,
-                                onCheckedChange = settingsViewModel::setLiquidGlassEnabled,
-                            )
-                        }
+                        WindowDropdownPreference(
+                            title = stringResource(R.string.floating_bar_effect),
+                            items = floatingBarEffectItems,
+                            selectedIndex = floatingBarEffect.ordinal,
+                            onSelectedIndexChange = { index ->
+                                settingsViewModel.setFloatingBarEffect(
+                                    FloatingBarEffect.entries[index]
+                                )
+                            },
+                        )
                     }
                     SwitchPreference(
                         title = stringResource(R.string.monet),
@@ -527,6 +525,15 @@ fun SettingsScreen(
                             settingsViewModel.setSearchPageSize(tempSearchPageSize.intValue)
                         }
                     )
+                    WindowDropdownPreference(
+                        title = stringResource(R.string.artist_separator),
+                        summary = stringResource(R.string.artist_separator_hint),
+                        items = artistSeparatorItems,
+                        selectedIndex = selectedArtistSeparatorIndex,
+                        onSelectedIndexChange = { index ->
+                            settingsViewModel.setSeparator(artistSeparators[index])
+                        }
+                    )
                     SwitchPreference(
                         title = stringResource(R.string.show_all_search_result_fields),
                         summary = stringResource(R.string.show_all_search_result_fields_summary),
@@ -598,15 +605,6 @@ fun SettingsScreen(
                         title = stringResource(R.string.non_lyrics_cleanup_rules_title),
                         summary = stringResource(R.string.non_lyrics_cleanup_rules_summary),
                         onClick = { navigator.navigate(LyricsCleanupRulesDestination()) }
-                    )
-                    WindowDropdownPreference(
-                        title = stringResource(R.string.artist_separator),
-                        summary = stringResource(R.string.artist_separator_hint),
-                        items = artistSeparatorItems,
-                        selectedIndex = selectedArtistSeparatorIndex,
-                        onSelectedIndexChange = { index ->
-                            settingsViewModel.setSeparator(artistSeparators[index])
-                        }
                     )
                     ArrowPreference(
                         title = stringResource(R.string.artist_split_settings_title),
