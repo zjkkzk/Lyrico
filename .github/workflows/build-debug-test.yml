@@ -1,4 +1,4 @@
-name: 🏗️ 构建 Release APK
+name: 🏗️ 手动构建 Release APK
 
 on:
   # push:  # 自动触发已注释，仅保留手动触发
