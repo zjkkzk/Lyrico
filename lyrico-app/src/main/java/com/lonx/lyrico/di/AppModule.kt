@@ -120,6 +120,7 @@ import org.koin.dsl.module
 import java.io.File
 import java.util.concurrent.TimeUnit
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.lonx.lyrico.viewmodel.ArtistPosterFoldersViewModel
 
 val appModule = module {
 
@@ -312,12 +313,13 @@ val appModule = module {
     viewModel { SearchSourceConfigViewModel(get(), get()) }
     viewModel { EditMetadataViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get()) }
     viewModel { EditFieldVisibilitySettingsViewModel(get()) }
-    viewModel { CustomTagManagementViewModel(get(), get()) }
+    viewModel { CustomTagManagementViewModel(get(), get(), get()) }
     viewModel { BatchMatchViewModel(get(), get(), get(), get(), get()) }
     viewModel { AppLogViewModel(get(),get()) }
     viewModel { PluginViewModel(get(), get(), get(), get(), get()) }
 
     viewModel { FolderManagerViewModel(get(), get(), get(), get(), get(), get()) }
+    viewModel { ArtistPosterFoldersViewModel(get(), get(), get()) }
     viewModel { BatchRenameViewModel(get(), get(), get(), get(), get()) }
     viewModel { CharacterMappingViewModel(get()) }
     viewModel { BatchExportViewModel(get(), get(), get()) }
