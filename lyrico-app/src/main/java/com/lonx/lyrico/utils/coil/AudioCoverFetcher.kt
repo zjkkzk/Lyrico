@@ -26,6 +26,7 @@ class AudioCoverFetcher(
     private val candidates: List<CoverCandidate>,
     private val artistName: String?,
     private val artistPosterFolders: List<String>,
+    private val skipEmbeddedPictures: Boolean,
     private val options: Options
 ) : Fetcher {
 
@@ -34,9 +35,18 @@ class AudioCoverFetcher(
             ?: listOf(CoverCandidate(uri, 0L))
 
         val pictureBytes = withContext(Dispatchers.IO) {
-            readRequestedPicture(candidateList)
-                ?: readExternalArtistPoster(options.context, artistName, artistPosterFolders)
-                ?: readFallbackPicture(candidateList)
+            if (skipEmbeddedPictures) {
+                // 调用方已经自己决定过内嵌海报归属，这里只查外置海报文件
+                readExternalArtistPoster(options.context, artistName, artistPosterFolders)
+            } else {
+                readRequestedPicture(candidateList)
+                    ?: readExternalArtistPoster(options.context, artistName, artistPosterFolders)
+                    // 只有描述对不上的内嵌图（例如整首歌只有别的艺术家的海报）时，也要显示出来，
+                    // 否则标签里明明有图却什么都不显示、用户也没法把它重新关联给某位艺术家。
+                    // 放在外置海报之后：它是兜底，不该挡住这位艺术家自己的海报文件。
+                    ?: readRequestedPicture(candidateList, includeOtherArtists = artistName != null)
+                    ?: readFallbackPicture(candidateList)
+            }
         } ?: return null
 
         if (pictureBytes.isEmpty()) {
@@ -55,7 +65,8 @@ class AudioCoverFetcher(
     }
 
     private suspend fun readRequestedPicture(
-        candidates: List<CoverCandidate>
+        candidates: List<CoverCandidate>,
+        includeOtherArtists: Boolean = false
     ): ByteArray? {
         for (candidate in candidates) {
             // A missing or unreadable candidate must not stop the poster folder lookup below.
@@ -65,7 +76,9 @@ class AudioCoverFetcher(
                         pfd = pfd,
                         pictureType = pictureType,
                         fallbackPictureTypes = fallbackPictureTypes,
-                        fallbackToAny = false
+                        fallbackToAny = includeOtherArtists,
+                        // 艺术家图片用描述记录归属：默认只认描述对得上（或没写描述）的那些
+                        description = artistName
                     )
                 }
             }
@@ -105,6 +118,7 @@ class AudioCoverFetcher(
             candidates = data.candidates,
             artistName = data.artistName,
             artistPosterFolders = data.artistPosterFolders,
+            skipEmbeddedPictures = data.skipEmbeddedPictures,
             options = options
         )
     }
