@@ -73,7 +73,7 @@ Tap the cover area or "Cover Options" in the editor to:
 | Search Cover Online | Search covers via enabled plugins |
 | Use Same-Album Cover | Use the first readable cover found from songs in the same album |
 | Remove Cover | Delete the current cover |
-| Save Cover | Export the current cover to the system pictures directory |
+| Save Cover | Save the current cover to a specified location or next to the audio file |
 | Crop Image | Crop the current cover before applying |
 
 Online cover search requires a plugin that supports cover search. Tap **Load more** at the bottom of the results; the **All** tab continues every cover source that still has another page.
@@ -110,7 +110,7 @@ Tap "Lyrics Options" to:
 |--------|-------------|
 | Search Lyrics | Search candidates through enabled lyrics sources; use **Load more** at the bottom for the next page |
 | Import | Read lyrics from a text file as UTF-8 |
-| Export | Export current lyrics. TTML exports as `.ttml`, others as `.lrc`; empty lyrics are not exported |
+| Export | Save current lyrics to a specified folder or next to the audio file. TTML exports as `.ttml`, others as `.lrc`; empty lyrics are not exported |
 | Simplify / Traditionalize | Convert lyrics between Simplified and Traditional Chinese |
 | Lyric Offset | Adjust in 100 ms steps, enter a value manually, or reset to 0 |
 | Format Lyrics | Convert format, sort by line, remove empty lines, or strip non-lyric content |

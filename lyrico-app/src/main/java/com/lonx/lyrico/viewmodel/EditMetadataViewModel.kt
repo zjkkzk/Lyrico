@@ -65,6 +65,7 @@ import com.lonx.lyrico.utils.PluginFieldPostProcessor
 import com.lonx.lyrico.utils.ReplayGainCalculateState
 import com.lonx.lyrico.utils.ReplayGainError
 import com.lonx.lyrico.utils.ReplayGainScanner
+import com.lonx.lyrico.utils.SafSiblingFileWriter
 import com.lonx.lyrico.utils.UiMessage
 import com.lonx.lyrico.utils.getCoverSourceType
 import com.lonx.lyrico.utils.lyrics.LyricsTextCleanup
@@ -83,6 +84,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.util.Locale
+import java.io.OutputStream
 
 data class EditMetadataUiState(
     val songInfo: SongInfo? = null,
@@ -126,6 +128,8 @@ private data class LyricsFormatConversionSession(
     val sourceLyrics: String,
     val lastRenderedLyrics: String
 )
+
+private const val LYRICS_EXPORT_MIME_TYPE = "application/octet-stream"
 
 class EditMetadataViewModel(
     private val songLibraryRepository: SongLibraryRepository,
@@ -663,19 +667,98 @@ class EditMetadataViewModel(
         }
     }
 
-    /**
-     * 导出当前封面到本地相册
-     */
-    fun exportCover(context: Context) {
-        val state = _uiState.value
-        exportPictureToGallery(
+    fun getCoverFileName(): String = "${_uiState.value.fileName ?: "Cover"}.jpg"
+
+    fun exportCover(context: Context, destinationUri: Uri) {
+        exportPictureToUri(
             context = context,
-            source = state.coverUri ?: state.originalCover ?: state.picture?.data,
-            albumName = "Covers",
-            filenamePrefix = "Cover",
+            source = currentCoverSource(),
+            destinationUri = destinationUri,
             failureLogMessage = "Failed to export cover",
             onResult = { success -> _uiState.update { it.copy(exportCoverResult = success) } }
         )
+    }
+
+    fun exportCoverToAudioDirectory(context: Context) {
+        val source = currentCoverSource()
+        val audioUri = (currentSong?.uri ?: currentSongUri)?.toUri()
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                if (source == null || audioUri == null) {
+                    recordMetadataFailure(
+                        message = "Failed to export cover next to audio: source unavailable",
+                        relatedId = currentSongUri
+                    )
+                    _uiState.update { it.copy(exportCoverResult = false) }
+                    return@launch
+                }
+
+                SafSiblingFileWriter.write(
+                    context = context,
+                    sourceDocumentUri = audioUri,
+                    mimeType = "image/jpeg",
+                    fileName = getCoverFileName()
+                ) { outputStream ->
+                    if (!writePictureSource(context, outputStream, source)) {
+                        throw IllegalStateException("Cover source stream unavailable")
+                    }
+                }
+                _uiState.update { it.copy(exportCoverResult = true) }
+            } catch (e: Exception) {
+                Log.e(TAG, "导出封面到音频同目录失败", e)
+                recordMetadataException(
+                    message = "Failed to export cover next to audio",
+                    relatedId = currentSongUri,
+                    throwable = e
+                )
+                _uiState.update { it.copy(exportCoverResult = false) }
+            }
+        }
+    }
+
+    private fun currentCoverSource(): Any? {
+        val state = _uiState.value
+        return state.coverUri ?: state.originalCover ?: state.picture?.data
+    }
+
+    private fun exportPictureToUri(
+        context: Context,
+        source: Any?,
+        destinationUri: Uri,
+        failureLogMessage: String,
+        onResult: (Boolean) -> Unit
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                if (source == null) {
+                    recordMetadataFailure(
+                        message = "$failureLogMessage: no picture source",
+                        relatedId = currentSongUri
+                    )
+                    onResult(false)
+                    return@launch
+                }
+                val wrotePicture = context.contentResolver.openOutputStream(destinationUri, "wt")
+                    ?.use { outputStream -> writePictureSource(context, outputStream, source) }
+                    ?: false
+                if (!wrotePicture) {
+                    recordMetadataFailure(
+                        message = "$failureLogMessage: source stream unavailable",
+                        relatedId = currentSongUri,
+                        detail = "Destination: $destinationUri"
+                    )
+                }
+                onResult(wrotePicture)
+            } catch (e: Exception) {
+                Log.e(TAG, "导出图片失败: $destinationUri", e)
+                recordMetadataException(
+                    message = failureLogMessage,
+                    relatedId = currentSongUri,
+                    throwable = e
+                )
+                onResult(false)
+            }
+        }
     }
 
     /**
@@ -716,44 +799,7 @@ class EditMetadataViewModel(
 
                 if (destUri != null) {
                     val wrotePicture = resolver.openOutputStream(destUri)?.use { outputStream ->
-                        when (getCoverSourceType(source)) {
-                            CoverSourceType.BYTE_ARRAY -> {
-                                outputStream.write(source as ByteArray)
-                                true
-                            }
-
-                            CoverSourceType.NETWORK_URL -> {
-                                java.net.URL(source.toString().trim()).openStream().use { inputStream ->
-                                    inputStream.copyTo(outputStream)
-                                }
-                                true
-                            }
-
-                            CoverSourceType.CONTENT_OR_FILE_URI,
-                            CoverSourceType.URI -> {
-                                val sourceUri = when (source) {
-                                    is Uri -> source
-                                    is String -> source.trim().toUri()
-                                    else -> null
-                                }
-                                sourceUri?.let {
-                                    resolver.openInputStream(it)?.use { inputStream ->
-                                        inputStream.copyTo(outputStream)
-                                        true
-                                    }
-                                } ?: false
-                            }
-
-                            CoverSourceType.FILE_PATH -> {
-                                java.io.FileInputStream(source.toString().trim()).use { inputStream ->
-                                    inputStream.copyTo(outputStream)
-                                }
-                                true
-                            }
-
-                            CoverSourceType.BITMAP,
-                            CoverSourceType.UNSUPPORTED -> false
-                        }
+                        writePictureSource(context, outputStream, source)
                     } ?: false
 
                     if (wrotePicture) {
@@ -1348,6 +1394,91 @@ class EditMetadataViewModel(
                 Log.e(TAG, "导出歌词失败", e)
                 recordMetadataException(
                     message = "Failed to export lyrics",
+                    relatedId = currentSongUri,
+                    throwable = e
+                )
+                _uiState.update { it.copy(exportLyricsResult = false) }
+            }
+        }
+    }
+
+    private fun writePictureSource(
+        context: Context,
+        outputStream: OutputStream,
+        source: Any
+    ): Boolean = when (getCoverSourceType(source)) {
+        CoverSourceType.BYTE_ARRAY -> {
+            outputStream.write(source as ByteArray)
+            true
+        }
+
+        CoverSourceType.NETWORK_URL -> {
+            java.net.URL(source.toString().trim()).openStream().use { inputStream ->
+                inputStream.copyTo(outputStream)
+            }
+            true
+        }
+
+        CoverSourceType.CONTENT_OR_FILE_URI,
+        CoverSourceType.URI -> {
+            val sourceUri = when (source) {
+                is Uri -> source
+                is String -> source.trim().toUri()
+                else -> null
+            }
+            sourceUri?.let {
+                context.contentResolver.openInputStream(it)?.use { inputStream ->
+                    inputStream.copyTo(outputStream)
+                    true
+                }
+            } ?: false
+        }
+
+        CoverSourceType.FILE_PATH -> {
+            java.io.FileInputStream(source.toString().trim()).use { inputStream ->
+                inputStream.copyTo(outputStream)
+            }
+            true
+        }
+
+        CoverSourceType.BITMAP -> (source as Bitmap).compress(
+            Bitmap.CompressFormat.JPEG,
+            100,
+            outputStream
+        )
+
+        CoverSourceType.UNSUPPORTED -> false
+    }
+
+    fun exportLyricsToAudioDirectory(context: Context) {
+        viewModelScope.launch {
+            try {
+                val lyrics = _uiState.value.editingTagData?.lyrics
+                val audioUri = (currentSong?.uri ?: currentSongUri)?.toUri()
+                val fileName = getLyricsFileName()
+                if (lyrics.isNullOrBlank() || audioUri == null || fileName == null) {
+                    recordMetadataFailure(
+                        message = "Failed to export lyrics next to audio: source or lyrics unavailable",
+                        relatedId = currentSongUri,
+                        level = AppLogLevel.WARNING
+                    )
+                    _uiState.update { it.copy(exportLyricsResult = false) }
+                    return@launch
+                }
+
+                val outputUri = SafSiblingFileWriter.write(
+                    context = context,
+                    sourceDocumentUri = audioUri,
+                    mimeType = LYRICS_EXPORT_MIME_TYPE,
+                    fileName = fileName,
+                    bytes = lyrics.toByteArray(Charsets.UTF_8)
+                )
+                _uiState.update { it.copy(exportLyricsResult = true) }
+                Log.d(TAG, "歌词已导出到音频同目录: ${outputUri.path}")
+            } catch (e: Exception) {
+                Log.e(TAG, "导出歌词到音频同目录失败", e)
+                recordMetadataException(
+                    message = "Failed to export lyrics next to audio",
                     relatedId = currentSongUri,
                     throwable = e
                 )
