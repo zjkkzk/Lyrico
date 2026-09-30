@@ -19,12 +19,11 @@ import com.lonx.lyrico.data.model.CharacterMappingConfig
 import com.lonx.lyrico.data.model.CharacterMappingDefaults
 import com.lonx.lyrico.data.model.ConversionMode
 import com.lonx.lyrico.data.model.FloatingBarEffect
-import com.lonx.lyrico.data.model.lyrics.DefaultLyricLineOrder
+import com.lonx.lyrico.data.model.ReplayGainPeakMode
+import com.lonx.lyrico.data.model.ReplayGainSettings
 import com.lonx.lyrico.data.model.lyrics.LyricFormat
-import com.lonx.lyrico.data.model.lyrics.LyricLineTrack
 import com.lonx.lyrico.data.model.lyrics.LyricRenderConfig
 import com.lonx.lyrico.data.model.lyrics.LyricsProcessingOptions
-import com.lonx.lyrico.data.model.lyrics.normalizedLyricLineOrder
 import com.lonx.lyrico.data.model.log.LogRetentionOption
 import com.lonx.lyrico.data.model.plugin.PluginMetadataFieldWriteRule
 import com.lonx.lyrico.data.model.SearchConfig
@@ -88,7 +87,6 @@ object SettingsDefaults {
     const val ALBUM_GRID_COLUMNS = 2
     const val SEPARATOR = "/"
     const val ROMA_ENABLED = true
-    val LYRIC_LINE_ORDER = DefaultLyricLineOrder
     const val TRANSLATION_ENABLED = true
     const val CHECK_UPDATE_ENABLED = true
     const val IGNORE_SHORT_AUDIO = true
@@ -98,6 +96,7 @@ object SettingsDefaults {
     const val LIMIT_LYRICS_INPUT_LINES = false
     val LOG_RETENTION_OPTION = LogRetentionOption.THIRTY_DAYS
     const val REPLAY_GAIN_TARGET_LOUDNESS = -18.0
+    val REPLAY_GAIN_PEAK_MODE = ReplayGainPeakMode.SAMPLE_PEAK
 
     val SEARCH_SOURCE_ORDER = emptyList<String>()
     val DEFAULT_ENABLED_SEARCH_SOURCES = emptySet<String>()
@@ -158,7 +157,6 @@ class SettingsRepositoryImpl(private val context: Context) : SettingsRepository 
         val ALBUM_GRID_COLUMNS = intPreferencesKey("album_grid_columns")
         val SEPARATOR = stringPreferencesKey("separator")
         val ROMA_ENABLED = booleanPreferencesKey("roma_enabled")
-        val LYRIC_LINE_ORDER = stringPreferencesKey("lyric_line_order")
         val CHECK_UPDATE_ENABLED = booleanPreferencesKey("check_update_enabled")
         val TRANSLATION_ENABLED = booleanPreferencesKey("translation_enabled")
         val LYRIC_INDEX_ENABLED = booleanPreferencesKey("lyric_index_enabled")
@@ -188,6 +186,7 @@ class SettingsRepositoryImpl(private val context: Context) : SettingsRepository 
         val ARTIST_SPLIT_CONFIG = stringPreferencesKey("artist_split_config")
         val LIBRARY_INDEX_VERSION = intPreferencesKey("library_index_version")
         val REPLAY_GAIN_TARGET_LOUDNESS = doublePreferencesKey("replay_gain_target_loudness")
+        val REPLAY_GAIN_PEAK_MODE = stringPreferencesKey("replay_gain_peak_mode")
     }
 
     override val lyricFormat: Flow<LyricFormat>
@@ -277,11 +276,6 @@ class SettingsRepositoryImpl(private val context: Context) : SettingsRepository 
             preferences[PreferencesKeys.ROMA_ENABLED] ?: SettingsDefaults.ROMA_ENABLED
         }
 
-    override val lyricLineOrder: Flow<List<LyricLineTrack>>
-        get() = context.settingsDataStore.data.map { preferences ->
-            decodeLyricLineOrder(preferences[PreferencesKeys.LYRIC_LINE_ORDER])
-        }
-
     override val translationEnabled: Flow<Boolean>
         get() = context.settingsDataStore.data.map { preferences ->
             preferences[PreferencesKeys.TRANSLATION_ENABLED] ?: SettingsDefaults.TRANSLATION_ENABLED
@@ -303,10 +297,18 @@ class SettingsRepositoryImpl(private val context: Context) : SettingsRepository 
             preferences[PreferencesKeys.IGNORE_SHORT_AUDIO] ?: SettingsDefaults.IGNORE_SHORT_AUDIO
         }
 
-    override val replayGainTargetLoudness: Flow<Double>
+    override val replayGainSettings: Flow<ReplayGainSettings>
         get() = context.settingsDataStore.data.map { preferences ->
-            preferences[PreferencesKeys.REPLAY_GAIN_TARGET_LOUDNESS]
-                ?: SettingsDefaults.REPLAY_GAIN_TARGET_LOUDNESS
+            ReplayGainSettings(
+                targetLoudness = preferences[PreferencesKeys.REPLAY_GAIN_TARGET_LOUDNESS]
+                    ?: SettingsDefaults.REPLAY_GAIN_TARGET_LOUDNESS,
+                peakMode = runCatching {
+                    ReplayGainPeakMode.valueOf(
+                        preferences[PreferencesKeys.REPLAY_GAIN_PEAK_MODE]
+                            ?: SettingsDefaults.REPLAY_GAIN_PEAK_MODE.name
+                    )
+                }.getOrDefault(SettingsDefaults.REPLAY_GAIN_PEAK_MODE)
+            )
         }
 
     override val searchSourceOrder: Flow<List<String>>
@@ -456,14 +458,12 @@ class SettingsRepositoryImpl(private val context: Context) : SettingsRepository 
         combine(
             lyricFormat,
             romaEnabled,
-            translationEnabled,
-            lyricLineOrder
-        ) { format, roma, translation, lineOrder ->
+            translationEnabled
+        ) { format, roma, translation ->
             LyricRenderConfig(
                 format = format,
                 showRomanization = roma,
-                showTranslation = translation,
-                lineOrder = lineOrder
+                showTranslation = translation
             )
         }
 
@@ -578,13 +578,6 @@ class SettingsRepositoryImpl(private val context: Context) : SettingsRepository 
         }
     }
 
-    override suspend fun saveLyricLineOrder(order: List<LyricLineTrack>) {
-        context.settingsDataStore.edit { preferences ->
-            preferences[PreferencesKeys.LYRIC_LINE_ORDER] =
-                order.normalizedLyricLineOrder().joinToString(",") { it.name }
-        }
-    }
-
     override suspend fun saveCheckUpdateEnabled(enabled: Boolean) {
         context.settingsDataStore.edit { preferences ->
             preferences[PreferencesKeys.CHECK_UPDATE_ENABLED] = enabled
@@ -614,6 +607,15 @@ class SettingsRepositoryImpl(private val context: Context) : SettingsRepository 
             preferences[PreferencesKeys.REPLAY_GAIN_TARGET_LOUDNESS] = loudness
         }
     }
+
+    override suspend fun saveReplayGainPeakMode(mode: ReplayGainPeakMode) {
+        context.settingsDataStore.edit { preferences ->
+            preferences[PreferencesKeys.REPLAY_GAIN_PEAK_MODE] = mode.name
+        }
+    }
+
+    override suspend fun getReplayGainSettings(): ReplayGainSettings =
+        replayGainSettings.first()
 
     override suspend fun saveLastScanTime(time: Long) {
         context.settingsDataStore.edit { preferences ->
@@ -734,7 +736,6 @@ class SettingsRepositoryImpl(private val context: Context) : SettingsRepository 
         val roma = prefs[PreferencesKeys.ROMA_ENABLED] ?: SettingsDefaults.ROMA_ENABLED
 
         val showTranslation = prefs[PreferencesKeys.TRANSLATION_ENABLED] ?: SettingsDefaults.TRANSLATION_ENABLED
-        val lineOrder = decodeLyricLineOrder(prefs[PreferencesKeys.LYRIC_LINE_ORDER])
 
         val removeEmptyLines = prefs[PreferencesKeys.REMOVE_EMPTY_LINES] ?: SettingsDefaults.REMOVE_EMPTY_LINES
         val onlyTranslationIfAvailable = prefs[PreferencesKeys.ONLY_TRANSLATION_IF_AVAILABLE] ?: SettingsDefaults.ONLY_TRANSLATION_IF_AVAILABLE
@@ -748,7 +749,6 @@ class SettingsRepositoryImpl(private val context: Context) : SettingsRepository 
             removeEmptyLines = removeEmptyLines,
             showTranslation = showTranslation,
             onlyTranslationIfAvailable = onlyTranslationIfAvailable,
-            lineOrder = lineOrder,
             conversionMode = conversionMode
         )
     }
@@ -795,10 +795,6 @@ class SettingsRepositoryImpl(private val context: Context) : SettingsRepository 
             romaEnabled = prefs[PreferencesKeys.ROMA_ENABLED]
                 ?: SettingsDefaults.ROMA_ENABLED,
 
-            lyricLineOrder = decodeLyricLineOrder(
-                prefs[PreferencesKeys.LYRIC_LINE_ORDER]
-            ).map { it.name },
-
             checkUpdateEnabled = prefs[PreferencesKeys.CHECK_UPDATE_ENABLED]
                 ?: SettingsDefaults.CHECK_UPDATE_ENABLED,
 
@@ -811,6 +807,8 @@ class SettingsRepositoryImpl(private val context: Context) : SettingsRepository 
 
             replayGainTargetLoudness = prefs[PreferencesKeys.REPLAY_GAIN_TARGET_LOUDNESS]
                 ?: SettingsDefaults.REPLAY_GAIN_TARGET_LOUDNESS,
+            replayGainPeakMode = prefs[PreferencesKeys.REPLAY_GAIN_PEAK_MODE]
+                ?: SettingsDefaults.REPLAY_GAIN_PEAK_MODE.name,
 
             searchSourceOrder = (prefs[PreferencesKeys.SEARCH_SOURCE_ORDER] ?: SettingsDefaults.SEARCH_SOURCE_ORDER.idsToCsv()).csvToIds(),
 
@@ -880,17 +878,18 @@ class SettingsRepositoryImpl(private val context: Context) : SettingsRepository 
                 }
                 backup.separator?.let { prefs[PreferencesKeys.SEPARATOR] = it }
                 backup.romaEnabled?.let { prefs[PreferencesKeys.ROMA_ENABLED] = it }
-                backup.lyricLineOrder?.let { names ->
-                    prefs[PreferencesKeys.LYRIC_LINE_ORDER] =
-                        decodeLyricLineOrder(names.joinToString(","))
-                            .joinToString(",") { it.name }
-                }
+
                 backup.checkUpdateEnabled?.let { prefs[PreferencesKeys.CHECK_UPDATE_ENABLED] = it }
                 backup.translationEnabled?.let { prefs[PreferencesKeys.TRANSLATION_ENABLED] = it }
                 backup.lyricIndexEnabled?.let { prefs[PreferencesKeys.LYRIC_INDEX_ENABLED] = it }
                 backup.ignoreShortAudio?.let { prefs[PreferencesKeys.IGNORE_SHORT_AUDIO] = it }
                 backup.replayGainTargetLoudness?.let {
                     prefs[PreferencesKeys.REPLAY_GAIN_TARGET_LOUDNESS] = it
+                }
+                backup.replayGainPeakMode?.let { modeName ->
+                    runCatching { ReplayGainPeakMode.valueOf(modeName) }
+                        .getOrNull()
+                        ?.let { prefs[PreferencesKeys.REPLAY_GAIN_PEAK_MODE] = it.name }
                 }
                 backup.searchSourceOrder?.let { list ->
                     prefs[PreferencesKeys.SEARCH_SOURCE_ORDER] = list.idsToCsv()
@@ -1246,16 +1245,6 @@ class SettingsRepositoryImpl(private val context: Context) : SettingsRepository 
             .map { it.trim() }
             .filter { it.isNotEmpty() }
             .distinct()
-    }
-
-    private fun decodeLyricLineOrder(raw: String?): List<LyricLineTrack> {
-        if (raw.isNullOrBlank()) return SettingsDefaults.LYRIC_LINE_ORDER
-        return raw
-            .split(',', '\n', ';')
-            .mapNotNull { name ->
-                runCatching { LyricLineTrack.valueOf(name.trim()) }.getOrNull()
-            }
-            .normalizedLyricLineOrder()
     }
 
     private fun String.toStableSourceId(): String {

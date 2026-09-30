@@ -12,8 +12,9 @@ import com.lonx.lyrico.data.model.ArtistSeparator
 import com.lonx.lyrico.data.model.cache.CacheCategory
 import com.lonx.lyrico.data.model.ConversionMode
 import com.lonx.lyrico.data.model.FloatingBarEffect
+import com.lonx.lyrico.data.model.ReplayGainPeakMode
+import com.lonx.lyrico.data.model.ReplayGainSettings
 import com.lonx.lyrico.data.model.lyrics.LyricFormat
-import com.lonx.lyrico.data.model.lyrics.LyricLineTrack
 import com.lonx.lyrico.data.model.lyrics.LyricsProcessingOptions
 import com.lonx.lyrico.data.model.plugin.PluginMetadataFieldWriteRule
 import com.lonx.lyrico.data.model.ThemeMode
@@ -42,7 +43,6 @@ data class SettingsUiState(
     val lyricFormat: LyricFormat = LyricFormat.VERBATIM_LRC,
     val separator: ArtistSeparator = ArtistSeparator.SLASH,
     val romaEnabled: Boolean = false,
-    val lyricLineOrder: List<LyricLineTrack> = emptyList(),
     val translationEnabled: Boolean = false,
     val lyricIndexEnabled: Boolean = false,
     val ignoreShortAudio: Boolean = false,
@@ -64,7 +64,8 @@ data class SettingsUiState(
     val conversionMode: ConversionMode = ConversionMode.NONE,
     val lyricsTagLineKeywords: List<String> = emptyList(),
     val metadataFieldWriteRules: List<PluginMetadataFieldWriteRule> = emptyList(),
-    val replayGainTargetLoudness: Double = -18.0
+    val replayGainTargetLoudness: Double = -18.0,
+    val replayGainPeakMode: ReplayGainPeakMode = ReplayGainPeakMode.SAMPLE_PEAK
 ) {
     /**
      * 返回按优先级排序且启用的搜索源列表
@@ -91,6 +92,7 @@ class SettingsViewModel(
         val lyricsTagLineKeywords: List<String>,
         val metadataFieldRules: List<PluginMetadataFieldWriteRule>,
         val replayGainTargetLoudness: Double,
+        val replayGainPeakMode: ReplayGainPeakMode,
         val floatingBottomBarEnabled: Boolean,
         val barBlurEnabled: Boolean,
         val floatingBarEffect: FloatingBarEffect
@@ -106,7 +108,7 @@ class SettingsViewModel(
         val ignoreShortAudio: Boolean,
         val lyricsTagLineKeywords: List<String>,
         val metadataFieldRules: List<PluginMetadataFieldWriteRule>,
-        val replayGainTargetLoudness: Double,
+        val replayGain: ReplayGainSettings,
         val visual: VisualSettingsState
     )
 
@@ -122,10 +124,10 @@ class SettingsViewModel(
         settingsRepository.ignoreShortAudio,
         settingsRepository.lyricsTagLineKeywords,
         settingsRepository.metadataFieldWriteRules,
-        settingsRepository.replayGainTargetLoudness,
+        settingsRepository.replayGainSettings,
         visualSettingsState,
-    ) { ignoreShort, lyricsTagLineKeywords, metadataFieldRules, rgTargetLoudness, visual ->
-        SettingsTailState(ignoreShort, lyricsTagLineKeywords, metadataFieldRules, rgTargetLoudness, visual)
+    ) { ignoreShort, lyricsTagLineKeywords, metadataFieldRules, replayGain, visual ->
+        SettingsTailState(ignoreShort, lyricsTagLineKeywords, metadataFieldRules, replayGain, visual)
     }
 
     private val settingsBaseState = combine(
@@ -141,7 +143,8 @@ class SettingsViewModel(
             tail.ignoreShortAudio,
             tail.lyricsTagLineKeywords,
             tail.metadataFieldRules,
-            tail.replayGainTargetLoudness,
+            tail.replayGain.targetLoudness,
+            tail.replayGain.peakMode,
             tail.visual.floatingBottomBarEnabled,
             tail.visual.barBlurEnabled,
             tail.visual.floatingBarEffect,
@@ -157,7 +160,6 @@ class SettingsViewModel(
             isInitialized = true,
             lyricFormat = base.lyric.format,
             romaEnabled = base.lyric.showRomanization,
-            lyricLineOrder = base.lyric.normalizedLineOrder,
             translationEnabled = base.lyric.showTranslation,
             separator = base.search.separator.toArtistSeparator(),
             searchSourceOrder = base.search.searchSourceOrder,
@@ -180,7 +182,8 @@ class SettingsViewModel(
             conversionMode = base.lyric.conversionMode,
             lyricsTagLineKeywords = base.lyricsTagLineKeywords,
             metadataFieldWriteRules = base.metadataFieldRules,
-            replayGainTargetLoudness = base.replayGainTargetLoudness
+            replayGainTargetLoudness = base.replayGainTargetLoudness,
+            replayGainPeakMode = base.replayGainPeakMode
         )
     }
 
@@ -215,11 +218,7 @@ class SettingsViewModel(
             settingsRepository.saveRomaEnabled(enabled)
         }
     }
-    fun setLyricLineOrder(order: List<LyricLineTrack>) {
-        viewModelScope.launch {
-            settingsRepository.saveLyricLineOrder(order)
-        }
-    }
+
     suspend fun clearSongs(): Boolean = withContext(Dispatchers.IO) {
         folder.clearAllFolders()
         val counts = folder.getFoldersCount()
@@ -333,6 +332,12 @@ class SettingsViewModel(
             settingsRepository.saveReplayGainTargetLoudness(loudness)
         }
     }
+
+    fun setReplayGainPeakMode(mode: ReplayGainPeakMode) {
+        viewModelScope.launch {
+            settingsRepository.saveReplayGainPeakMode(mode)
+        }
+    }
     fun setSearchSourceOrder(sources: List<String>) {
         viewModelScope.launch {
             settingsRepository.saveSearchSourceOrder(sources)
@@ -373,8 +378,6 @@ class SettingsViewModel(
             settingsRepository.saveThemeMode(mode)
         }
     }
-
-
 
     fun exportSettings(context: Context, uri: Uri) {
         viewModelScope.launch(Dispatchers.IO) {

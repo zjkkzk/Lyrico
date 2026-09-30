@@ -22,7 +22,7 @@ import com.lonx.lyrico.worker.processor.EditTagsTaskConfig
 import com.lonx.lyrico.worker.processor.MatchMetadataTaskConfig
 import com.lonx.lyrico.worker.processor.RenameFilesTaskConfig
 import com.lonx.lyrico.viewmodel.LyricsFormatConfig
-import com.lonx.lyrico.viewmodel.ReplayGainConfig
+import com.lonx.lyrico.worker.processor.ReplayGainTaskConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
@@ -297,7 +297,7 @@ class BatchTaskWorker(
             BatchTaskType.MATCH_COVER -> applicationContext.getString(R.string.batch_task_match_cover)
             BatchTaskType.EDIT_TAGS -> applicationContext.getString(R.string.batch_task_edit_tags)
             BatchTaskType.RENAME_FILES -> applicationContext.getString(R.string.batch_task_rename_files)
-            BatchTaskType.CONVERT_LYRICS_FORMAT -> applicationContext.getString(R.string.batch_task_convert_lyrics_format)
+            BatchTaskType.CONVERT_LYRICS_FORMAT -> applicationContext.getString(R.string.lyrics_process_title)
             BatchTaskType.SCAN_REPLAY_GAIN -> applicationContext.getString(R.string.batch_task_scan_replay_gain)
             BatchTaskType.EXPORT_LYRICS -> applicationContext.getString(R.string.batch_task_export_lyrics)
             BatchTaskType.EXPORT_COVER -> applicationContext.getString(R.string.batch_task_export_cover)
@@ -469,6 +469,9 @@ class BatchTaskWorker(
         return buildString {
             appendLine("targetFormat=${config.targetFormat?.name ?: "KEEP"}")
             appendLine("concurrency=${config.concurrency}")
+            appendLine("operation=${config.operation}")
+            appendLine("twoColumnMapping=${config.twoColumnMapping}")
+            appendLine("threeColumnMapping=${config.threeColumnMapping}")
             appendLine("formatLineOrder=${config.formatLineOrder}")
             appendLine("removeTagLines=${config.removeTagLines}")
             appendLine("removeEmptyLines=${config.removeEmptyLines}")
@@ -476,8 +479,12 @@ class BatchTaskWorker(
     }
 
     private fun summarizeReplayGainConfig(configJson: String): String {
-        val config = Json.decodeFromString<ReplayGainConfig>(configJson)
-        return "concurrency=${config.concurrency}"
+        val config = Json.decodeFromString<ReplayGainTaskConfig>(configJson)
+        return buildString {
+            appendLine("concurrency=${config.concurrency}")
+            config.targetLoudness?.let { appendLine("targetLoudness=$it") }
+            config.peakMode?.let { appendLine("peakMode=${it.name}") }
+        }.trimEnd()
     }
 
     private fun summarizeExportConfig(configJson: String): String {

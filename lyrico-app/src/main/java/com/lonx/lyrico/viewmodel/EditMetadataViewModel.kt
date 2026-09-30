@@ -68,6 +68,7 @@ import com.lonx.lyrico.utils.ReplayGainScanner
 import com.lonx.lyrico.utils.SafSiblingFileWriter
 import com.lonx.lyrico.utils.UiMessage
 import com.lonx.lyrico.utils.getCoverSourceType
+import com.lonx.lyrico.utils.lyrics.LyricsColumnSorter
 import com.lonx.lyrico.utils.lyrics.LyricsTextCleanup
 import com.lonx.lyrico.utils.lyrics.document.LyricsDocumentPipeline
 import kotlinx.coroutines.CancellationException
@@ -1175,7 +1176,7 @@ class EditMetadataViewModel(
         if (_uiState.value.isReplayGainCalculating) return
 
         scanJob = viewModelScope.launch {
-            val targetLoudness = settingsRepository.replayGainTargetLoudness.first()
+            val replayGainSettings = settingsRepository.getReplayGainSettings()
             _uiState.update {
                 it.copy(
                     isReplayGainCalculating = true,
@@ -1185,7 +1186,7 @@ class EditMetadataViewModel(
             }
 
             try {
-                replayGainScanner.analyze(uriString)
+                replayGainScanner.analyze(uriString, replayGainSettings.peakMode)
                     .flowOn(Dispatchers.IO) // 将解码和 DSP 计算放入 IO 线程池，不卡顿 UI
                     .collect { state ->     // 持续监听发射出来的状态
                         when (state) {
@@ -1202,9 +1203,14 @@ class EditMetadataViewModel(
                                     val current = ui.editingTagData ?: AudioTagData(fileName = ui.fileName.orEmpty())
                                     ui.copy(
                                         editingTagData = current.copy(
-                                            replayGainTrackGain = replayGainScanner.formatGain(state.analysis, targetLoudness),
+                                            replayGainTrackGain = replayGainScanner.formatGain(
+                                                state.analysis,
+                                                replayGainSettings.targetLoudness
+                                            ),
                                             replayGainTrackPeak = replayGainScanner.formatPeak(state.analysis.peak),
-                                            replayGainReferenceLoudness = replayGainScanner.formatReferenceLoudness(targetLoudness)
+                                            replayGainReferenceLoudness = replayGainScanner.formatReferenceLoudness(
+                                                replayGainSettings.targetLoudness
+                                            )
                                         ),
                                         isEditing = true,
                                         isReplayGainCalculating = false,
@@ -1547,9 +1553,7 @@ class EditMetadataViewModel(
     fun convertLyricsFormat(targetFormat: LyricFormat) {
         processLyrics(
             LyricsProcessingOptions(
-                targetFormat = targetFormat,
-                formatLineOrder = true,
-                removeEmptyLines = true
+                targetFormat = targetFormat
             )
         )
     }
@@ -1560,21 +1564,33 @@ class EditMetadataViewModel(
 
         viewModelScope.launch {
             try {
-                val currentFormat = LyricDecoder.detectFormat(currentLyrics) ?: return@launch
+                if (options.formatLineOrder) {
+                    val converted = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                        LyricsColumnSorter.apply(currentLyrics, options.twoColumnMapping, options.threeColumnMapping)
+                    }
+                    if (converted != currentLyrics && _uiState.value.editingTagData?.lyrics == currentLyrics) {
+                        lyricsFormatConversionSession = null
+                        updateTag { copy(lyrics = converted) }
+                    }
+                    if (options.targetFormat == null && !options.removeEmptyLines && !options.removeTagLines) return@launch
+                }
+                val currentFormat = LyricDecoder.detectFormat(currentLyrics)
                 val targetFormat = options.targetFormat ?: currentFormat
+                if (options.targetFormat != null && options.targetFormat == currentFormat && !options.hasTextOperations()) return@launch
                 val tagLineKeywords = if (options.removeTagLines) {
                     settingsRepository.lyricsTagLineKeywords.first()
                 } else {
                     emptyList()
                 }
 
-                val converted = if (options.targetFormat == null && !options.formatLineOrder) {
+                val converted = if (options.targetFormat == null && !options.formatLineOrder && currentFormat != LyricFormat.TTML) {
                     LyricsTextCleanup.process(
                         raw = currentLyrics,
                         removeEmptyLines = options.removeEmptyLines,
                         tagLineKeywords = tagLineKeywords
-                    ).takeIf { it.isNotBlank() }
+                    )
                 } else {
+                    if (currentFormat == null || targetFormat == null) return@launch
                     LyricsDocumentPipeline.process(
                         raw = currentLyrics,
                         sourceFormat = currentFormat,
@@ -1584,8 +1600,10 @@ class EditMetadataViewModel(
                     ) ?: convertLyricsFormatFromCurrent(currentLyrics, targetFormat)
                 } ?: return@launch
 
-                lyricsFormatConversionSession = null
-                updateTag { copy(lyrics = converted) }
+                if (_uiState.value.editingTagData?.lyrics == currentLyrics) {
+                    lyricsFormatConversionSession = null
+                    updateTag { copy(lyrics = converted) }
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "歌词处理失败", e)
                 recordMetadataException(
@@ -1626,7 +1644,7 @@ class EditMetadataViewModel(
             conversionMode = ConversionMode.NONE,
             showTranslation = lyricsResult.translated != null,
             showRomanization = lyricsResult.romanization != null,
-            removeEmptyLines = true,
+            removeEmptyLines = false,
             onlyTranslationIfAvailable = false
         )
 

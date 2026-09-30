@@ -4,8 +4,9 @@ import com.lonx.lyrico.data.model.BatchMatchConfig
 import com.lonx.lyrico.data.model.CharacterMappingConfig
 import com.lonx.lyrico.data.model.ConversionMode
 import com.lonx.lyrico.data.model.FloatingBarEffect
+import com.lonx.lyrico.data.model.ReplayGainPeakMode
+import com.lonx.lyrico.data.model.ReplayGainSettings
 import com.lonx.lyrico.data.model.lyrics.LyricFormat
-import com.lonx.lyrico.data.model.lyrics.LyricLineTrack
 import com.lonx.lyrico.data.model.lyrics.LyricRenderConfig
 import com.lonx.lyrico.data.model.log.LogRetentionOption
 import com.lonx.lyrico.data.model.plugin.PluginMetadataFieldWriteRule
@@ -42,7 +43,6 @@ interface SettingsRepository {
     val albumGridColumns: Flow<Int>
     val separator: Flow<String>
     val romaEnabled: Flow<Boolean>
-    val lyricLineOrder: Flow<List<LyricLineTrack>>
 
     val conversionMode: Flow<ConversionMode>
 
@@ -50,7 +50,7 @@ interface SettingsRepository {
     val checkUpdateEnabled: Flow<Boolean>
     val lyricIndexEnabled: Flow<Boolean>
     val ignoreShortAudio: Flow<Boolean>
-    val replayGainTargetLoudness: Flow<Double>
+    val replayGainSettings: Flow<ReplayGainSettings>
     val searchSourceOrder: Flow<List<String>>
     val enabledSearchSources: Flow<Set<String>>
     val searchPageSize: Flow<Int>
@@ -85,13 +85,14 @@ interface SettingsRepository {
     suspend fun saveAlbumGridColumns(columns: Int)
     suspend fun saveSeparator(separator: String)
     suspend fun saveRomaEnabled(enabled: Boolean)
-    suspend fun saveLyricLineOrder(order: List<LyricLineTrack>)
     suspend fun saveConversionMode(mode: ConversionMode)
     suspend fun saveCheckUpdateEnabled(enabled: Boolean)
     suspend fun saveTranslationEnabled(enabled: Boolean)
     suspend fun saveLyricIndexEnabled(enabled: Boolean)
     suspend fun saveIgnoreShortAudio(enabled: Boolean)
     suspend fun saveReplayGainTargetLoudness(loudness: Double)
+    suspend fun saveReplayGainPeakMode(mode: ReplayGainPeakMode)
+    suspend fun getReplayGainSettings(): ReplayGainSettings
     suspend fun saveLastScanTime(time: Long)
     suspend fun saveSearchSourceOrder(sources: List<String>)
     suspend fun saveEnabledSearchSources(sources: Set<String>)

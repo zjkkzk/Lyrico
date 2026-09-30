@@ -49,10 +49,10 @@ import com.lonx.lyrico.data.model.AppLanguage
 import com.lonx.lyrico.data.model.ArtistSeparator
 import com.lonx.lyrico.data.model.ConversionMode
 import com.lonx.lyrico.data.model.FloatingBarEffect
+import com.lonx.lyrico.data.model.ReplayGainPeakMode
 import com.lonx.lyrico.data.model.SearchSourceTabStyle
 import com.lonx.lyrico.data.model.ThemeMode
 import com.lonx.lyrico.data.model.lyrics.LyricFormat
-import com.lonx.lyrico.data.model.lyrics.visibleLyricLineTracks
 import com.lonx.lyrico.data.repository.SettingsRepository
 import com.lonx.lyrico.ui.components.RoundedRectanglePainter
 import com.lonx.lyrico.ui.components.base.YesNoBottomSheet
@@ -60,7 +60,6 @@ import com.lonx.lyrico.ui.components.blur.BlurredTopBar
 import com.lonx.lyrico.ui.components.blur.blurSource
 import com.lonx.lyrico.ui.components.blur.rememberBarBlurBackdrop
 import com.lonx.lyrico.ui.components.getSystemWallpaperColor
-import com.lonx.lyrico.ui.components.lyrics.LyricLineOrderBottomSheetContent
 import com.lonx.lyrico.ui.components.scaffoldContentPadding
 import com.lonx.lyrico.ui.theme.KeyColors
 import com.lonx.lyrico.viewmodel.FolderManagerViewModel
@@ -130,7 +129,6 @@ fun SettingsScreen(
     val lyricFormat = settingsUiState.lyricFormat
     val artistSeparator = settingsUiState.separator
     val romaEnabled = settingsUiState.romaEnabled
-    val lyricLineOrder = settingsUiState.lyricLineOrder
     val themeMode = settingsUiState.themeMode
     val monetEnable = settingsUiState.monetEnable
     val floatingBottomBarEnabled = settingsUiState.floatingBottomBarEnabled
@@ -157,7 +155,6 @@ fun SettingsScreen(
         mutableIntStateOf(searchPageSize)
     }
     val showClearCacheDialog = remember { mutableStateOf(false) }
-    val showLyricLineOrderSheet = remember { mutableStateOf(false) }
     val showRgTargetDialog = remember { mutableStateOf(false) }
     val monetVisibilityState = remember(settingsUiState.isInitialized) {
         MutableTransitionState(monetEnable)
@@ -178,6 +175,13 @@ fun SettingsScreen(
     val selectedConversionModeIndex =
         ConversionMode.entries.indexOf(conversionMode).coerceAtLeast(0)
     val searchSourceTabStyleItems = SearchSourceTabStyle.entries.map { stringResource(it.labelRes) }
+    val replayGainPeakModeItems = listOf(
+        stringResource(R.string.replay_gain_peak_mode_sample),
+        stringResource(R.string.replay_gain_peak_mode_true)
+    )
+    val selectedReplayGainPeakModeIndex = ReplayGainPeakMode.entries
+        .indexOf(settingsUiState.replayGainPeakMode)
+        .coerceAtLeast(0)
     val selectedSearchSourceTabStyleIndex =
         SearchSourceTabStyle.entries.indexOf(searchSourceTabStyle).coerceAtLeast(0)
 
@@ -195,15 +199,6 @@ fun SettingsScreen(
     }
     val artistSeparatorItems = artistSeparators.map { it.toText() }
     val selectedArtistSeparatorIndex = artistSeparators.indexOf(artistSeparator).coerceAtLeast(0)
-    val visibleLyricLineTracks = visibleLyricLineTracks(
-        showRomanization = romaEnabled,
-        showTranslation = translationEnabled,
-        onlyTranslationIfAvailable = onlyTranslationIfAvailable
-    )
-    val lyricLineOrderSummary = lyricLineOrder
-        .filter { it in visibleLyricLineTracks }
-        .joinToString(separator = " / ") { context.getString(it.labelRes) }
-
 
     LaunchedEffect(Unit) {
         settingsViewModel.refreshCache(context)
@@ -346,19 +341,6 @@ fun SettingsScreen(
             onDismiss = { showRgTargetDialog.value = false },
             onSave = { settingsViewModel.setReplayGainTargetLoudness(it) }
         )
-        WindowBottomSheet(
-            show = showLyricLineOrderSheet.value,
-            title = stringResource(R.string.lyric_line_order),
-            onDismissRequest = {
-                showLyricLineOrderSheet.value = false
-            }
-        ) {
-            LyricLineOrderBottomSheetContent(
-                lineOrder = lyricLineOrder,
-                visibleTracks = visibleLyricLineTracks,
-                onLineOrderChange = settingsViewModel::setLyricLineOrder
-            )
-        }
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -524,6 +506,16 @@ fun SettingsScreen(
                         onClick = { showRgTargetDialog.value = true },
                         holdDownState = showRgTargetDialog.value
                     )
+                    WindowDropdownPreference(
+                        title = stringResource(R.string.settings_replay_gain_peak_mode),
+                        items = replayGainPeakModeItems,
+                        selectedIndex = selectedReplayGainPeakModeIndex,
+                        onSelectedIndexChange = { index ->
+                            settingsViewModel.setReplayGainPeakMode(
+                                ReplayGainPeakMode.entries[index]
+                            )
+                        }
+                    )
                 }
             }
 
@@ -610,11 +602,6 @@ fun SettingsScreen(
                             onCheckedChange = { settingsViewModel.setOnlyTranslationIfAvailable(it) }
                         )
                     }
-                    ArrowPreference(
-                        title = stringResource(R.string.lyric_line_order),
-                        summary = lyricLineOrderSummary,
-                        onClick = { showLyricLineOrderSheet.value = true }
-                    )
                 }
             }
 
