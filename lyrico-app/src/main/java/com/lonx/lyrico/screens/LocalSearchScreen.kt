@@ -47,7 +47,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.lonx.lyrico.ui.components.library.SelectableLibraryItem
 import com.lonx.lyrico.R
+import com.lonx.lyrico.ui.components.library.EmptyStateKind
+import com.lonx.lyrico.ui.components.library.IllustratedEmptyState
 import com.lonx.lyrico.data.model.entity.AlbumEntity
 import com.lonx.lyrico.data.model.entity.ArtistEntity
 import com.lonx.lyrico.data.model.entity.SongEntity
@@ -58,7 +61,7 @@ import com.lonx.lyrico.ui.components.base.PillButton
 import com.lonx.lyrico.ui.components.base.PillButtonDefaults
 import com.lonx.lyrico.ui.components.base.PillButtonSize
 import com.lonx.lyrico.ui.components.album.AlbumListItem
-import com.lonx.lyrico.ui.components.artist.ArtistListItem
+import com.lonx.lyrico.ui.components.artist.ArtistListItemContent
 import com.lonx.lyrico.ui.components.bar.SearchBar
 import com.lonx.lyrico.ui.components.bar.SongBatchSelectionActions
 import com.lonx.lyrico.ui.components.bar.SongSelectionTopAppBar
@@ -66,7 +69,7 @@ import com.lonx.lyrico.ui.components.scaffoldContentPadding
 import com.lonx.lyrico.ui.components.scaffoldTopAppBarInsetsPadding
 import com.lonx.lyrico.ui.components.search.SearchSectionHeader
 import com.lonx.lyrico.ui.components.song.SongActionSheets
-import com.lonx.lyrico.ui.components.song.SongListItem
+import com.lonx.lyrico.ui.components.song.SongListItemContent
 import com.lonx.lyrico.ui.components.song.SongListItemActions
 import com.lonx.lyrico.viewmodel.LocalSearchViewModel
 import com.lonx.lyrico.viewmodel.SongSelectionViewModel
@@ -439,7 +442,11 @@ private fun LocalSearchResultsPage(
     ) {
         if (searchQuery.isNotBlank() && !hasResults) {
             item {
-                SearchEmptyCard()
+                IllustratedEmptyState(
+                    kind = EmptyStateKind.Search,
+                    title = stringResource(R.string.search_empty),
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         }
 
@@ -695,10 +702,14 @@ private fun androidx.compose.foundation.lazy.LazyListScope.ArtistsSection(
         items = artists,
         key = { artist -> artist.name }
     ) { artist ->
-        ArtistListItem(
-            artist = artist,
+        SelectableLibraryItem(
+            itemKey = artist.id,
             onClick = { onArtistClick(artist) }
-        )
+        ) {
+            ArtistListItemContent(
+                artist = artist
+            )
+        }
     }
 }
 
@@ -718,48 +729,35 @@ private fun LocalSearchSongItem(
     onSwipeSelection: (SongEntity, List<SongEntity>) -> Unit,
     onShowSongMenu: (SongEntity) -> Unit
 ) {
-    SongListItem(
-        song = song,
+    SelectableLibraryItem(
+        itemKey = song.uri,
         isSelectionMode = isSelectionMode,
         isSelected = isSelected,
         swipeSelectionLabel = swipeSelectionLabel,
         swipeSelectionSecondaryLabel = swipeSelectionSecondaryLabel,
-        previewLabel = previewLabel,
-        previewText = previewText,
-        previewMatchQuery = previewMatchQuery,
         onClick = { onSongClick(song) },
         onToggleSelection = { onToggleSelection(song) },
-        onSwipeSelection = { onSwipeSelection(song, pageSongs) },
-        trailingContent = {
-            Box(modifier = Modifier.padding(end = 8.dp)) {
-                SongListItemActions(
-                    isSelectionMode = isSelectionMode,
-                    isSelected = isSelected,
-                    onToggleSelection = { onToggleSelection(song) },
-                    onShowMenu = { onShowSongMenu(song) }
-                )
-            }
-        }
-    )
-}
-
-@Composable
-private fun SearchEmptyCard() {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .height(160.dp),
-        contentAlignment = Alignment.Center
+        onSwipeSelection = { onSwipeSelection(song, pageSongs) }
     ) {
-        Card(
-            modifier = Modifier.padding(horizontal = 12.dp)
-        ) {
-            BasicComponent(
-                title = stringResource(R.string.search_empty)
-            )
-        }
+        SongListItemContent(
+            song = song,
+            previewLabel = previewLabel,
+            previewText = previewText,
+            previewMatchQuery = previewMatchQuery,
+            trailingContent = {
+                Box(modifier = Modifier.padding(end = 8.dp)) {
+                    SongListItemActions(
+                        isSelectionMode = isSelectionMode,
+                        isSelected = isSelected,
+                        onToggleSelection = { onToggleSelection(song) },
+                        onShowMenu = { onShowSongMenu(song) }
+                    )
+                }
+            }
+        )
     }
 }
+
 
 private fun localSearchSongKey(song: SongEntity): String {
     val stableId = song.uri.takeIf { it.isNotBlank() && it != "0" } ?: song.id.toString()

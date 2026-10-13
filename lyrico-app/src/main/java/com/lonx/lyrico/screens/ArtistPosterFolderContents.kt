@@ -1,43 +1,33 @@
 package com.lonx.lyrico.screens
 
-import android.widget.MediaController
-import android.widget.VideoView
+import top.yukonga.miuix.kmp.icon.extended.Refresh
+import top.yukonga.miuix.kmp.icon.extended.Folder
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.rememberTransformableState
-import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.core.net.toUri
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import com.lonx.lyrico.R
+import com.lonx.lyrico.ui.components.library.EmptyStateKind
+import com.lonx.lyrico.ui.components.library.IllustratedEmptyState
 import com.lonx.lyrico.viewmodel.ArtistPosterFile
 import com.lonx.lyrico.viewmodel.ArtistPosterFolder
 import top.yukonga.miuix.kmp.basic.*
 import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.extended.Back
 import top.yukonga.miuix.kmp.icon.extended.AddFolder
 import top.yukonga.miuix.kmp.icon.extended.Image
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -49,17 +39,20 @@ internal fun ArtistPosterFolderContents(
     folder: ArtistPosterFolder,
     revision: Long,
     isLoading: Boolean,
+    enabled: Boolean,
     hasError: Boolean,
     onChangeFolder: () -> Unit,
     onRefresh: () -> Unit,
+    onFileMenu: (ArtistPosterFile) -> Unit,
+    previewUri: String?,
+    onDismissPreview: () -> Unit,
     padding: PaddingValues,
     scrollBehavior: ScrollBehavior
 ) {
     val files = folder.posters.orEmpty()
-    var previewUri by remember(folder.uri) { mutableStateOf<String?>(null) }
     if (files.isEmpty()) {
         Column(Modifier.fillMaxSize().padding(padding)) {
-            ArtistPosterDirectoryCard(folder, !isLoading, onChangeFolder,
+            ArtistPosterDirectoryCard(folder, enabled && !isLoading, onChangeFolder,
                 Modifier.padding(top = 12.dp))
             if (isLoading) {
                 Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
@@ -67,9 +60,11 @@ internal fun ArtistPosterFolderContents(
                 }
             } else {
                 val unavailable = folder.posters == null
-                ArtistPosterEmptyState(
+                IllustratedEmptyState(
+                    kind = EmptyStateKind.Cover,
                     title = stringResource(if (unavailable) R.string.artist_poster_folder_unavailable else R.string.artist_poster_no_files),
                     summary = stringResource(if (hasError) R.string.artist_poster_folder_error else if (unavailable) R.string.artist_poster_folders_empty else R.string.artist_poster_empty_hint),
+                    icon = if (unavailable) MiuixIcons.Folder else MiuixIcons.Refresh,
                     actionText = stringResource(if (unavailable) R.string.artist_poster_folder_change else R.string.action_refresh_folder),
                     onAction = if (unavailable) onChangeFolder else onRefresh,
                     modifier = Modifier.fillMaxWidth().weight(1f)
@@ -88,7 +83,7 @@ internal fun ArtistPosterFolderContents(
         overscrollEffect = null
     ) {
         item(key = "folder", span = { GridItemSpan(maxLineSpan) }) {
-            ArtistPosterDirectoryCard(folder, !isLoading, onChangeFolder,
+            ArtistPosterDirectoryCard(folder, enabled && !isLoading, onChangeFolder,
                 Modifier.padding(top = 12.dp))
         }
         item(key = "count", span = { GridItemSpan(maxLineSpan) }) {
@@ -115,32 +110,36 @@ internal fun ArtistPosterFolderContents(
         items(files, key = { it.uri }) { file ->
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                onClick = { previewUri = file.uri },
+                onClick = if (enabled && !isLoading) { { onFileMenu(file) } } else null,
                 showIndication = true
             ) {
-                Box(Modifier.fillMaxWidth().aspectRatio(1f)) {
-                    PosterImage(file, revision, Modifier.fillMaxSize(), ContentScale.Crop)
-                    if (file.name.endsWith(".mp4", true)) {
-                        Text("MP4", color = Color.White, modifier = Modifier.align(Alignment.BottomEnd)
-                            .padding(6.dp).background(Color.Black.copy(alpha = .65f), RoundedCornerShape(4.dp))
-                            .padding(horizontal = 6.dp, vertical = 2.dp))
-                    }
+                PosterImage(file, revision, Modifier.fillMaxWidth().aspectRatio(4f / 5f), ContentScale.Crop)
+                Column(Modifier.fillMaxWidth().padding(12.dp)) {
+                    Text(
+                        file.artistName ?: stringResource(R.string.label_artist_image_unmatched),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        fontSize = MiuixTheme.textStyles.body2.fontSize,
+                        color = MiuixTheme.colorScheme.onSurfaceContainer,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text(
+                        file.name,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MiuixTheme.textStyles.footnote1,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
                 }
-                Text(
-                    file.name,
-                    minLines = 2,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    fontSize = MiuixTheme.textStyles.body2.fontSize,
-                    color = MiuixTheme.colorScheme.onSurfaceContainer,
-                    modifier = Modifier.padding(12.dp)
-                )
             }
         }
     }
     val previewIndex = files.indexOfFirst { it.uri == previewUri }
     if (previewIndex >= 0) {
-        PosterPreview(files, previewIndex, revision) { previewUri = null }
+        PosterPreview(files, previewIndex, revision,
+            onFileMenu = onFileMenu,
+            onDismiss = onDismissPreview)
     }
 }
 
@@ -208,50 +207,11 @@ private fun PosterImage(file: ArtistPosterFile, revision: Long, modifier: Modifi
 }
 
 @Composable
-private fun PosterPreview(files: List<ArtistPosterFile>, initialPage: Int, revision: Long, onDismiss: () -> Unit) {
-    val pager = rememberPagerState(initialPage = initialPage, pageCount = { files.size })
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
-        Column(Modifier.fillMaxSize().background(Color.Black).safeDrawingPadding()) {
-            Row(Modifier.fillMaxWidth().padding(end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onDismiss) { Icon(MiuixIcons.Back, stringResource(R.string.artist_poster_back), tint = Color.White) }
-                Text(files[pager.currentPage].name, color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f))
-                Text("${pager.currentPage + 1} / ${files.size}", color = Color.White, modifier = Modifier.padding(start = 12.dp))
-            }
-            HorizontalPager(pager, modifier = Modifier.fillMaxWidth().weight(1f), key = { files[it].uri }) { page ->
-                val file = files[page]
-                if (file.name.endsWith(".mp4", true) && page == pager.currentPage) {
-                    var failed by remember(file) { mutableStateOf(false) }
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        AndroidView(
-                            factory = { context ->
-                                VideoView(context).apply {
-                                    setVideoURI(file.uri.toUri())
-                                    setMediaController(MediaController(context).also { it.setAnchorView(this) })
-                                    setOnPreparedListener { start() }
-                                    setOnErrorListener { _, _, _ -> failed = true; true }
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            onRelease = { it.stopPlayback() }
-                        )
-                        if (failed) Text(stringResource(R.string.artist_poster_preview_error), color = Color.White)
-                    }
-                } else {
-                    var zoom by remember(file) { mutableFloatStateOf(1f) }
-                    var offset by remember(file) { mutableStateOf(Offset.Zero) }
-                    val transform = rememberTransformableState { zoomChange, pan, _ ->
-                        zoom = (zoom * zoomChange).coerceIn(1f, 5f)
-                        offset = if (zoom > 1f) offset + pan else Offset.Zero
-                    }
-                    Box(Modifier.fillMaxSize().clip(RoundedCornerShape(0.dp))) {
-                        PosterImage(file, revision, Modifier.fillMaxSize()
-                            .transformable(transform, canPan = { zoom > 1f })
-                            .graphicsLayer { scaleX = zoom; scaleY = zoom; translationX = offset.x; translationY = offset.y },
-                            ContentScale.Fit)
-                    }
-                }
-            }
-        }
-    }
+private fun PosterPreview(files: List<ArtistPosterFile>, initialPage: Int, revision: Long, onFileMenu: (ArtistPosterFile) -> Unit, onDismiss: () -> Unit) {
+    com.lonx.lyrico.ui.components.poster.ArtistPosterPreview(
+        pageCount = files.size, initialPage = initialPage, title = { files[it].name }, pageKey = { files[it].uri },
+        videoUri = { files[it].takeIf { file -> file.name.endsWith(".mp4", true) }?.uri },
+        onMore = { onFileMenu(files[it]) }, onDismiss = onDismiss,
+        imageContent = { index, modifier -> PosterImage(files[index], revision, modifier, ContentScale.Fit) }
+    )
 }

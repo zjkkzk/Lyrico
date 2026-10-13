@@ -2,11 +2,16 @@ package com.lonx.lyrico.viewmodel
 
 import android.app.Application
 import android.net.Uri
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.provider.DocumentsContract
+import com.lonx.lyrico.R
 import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.lonx.lyrico.data.repository.LibraryIndexRepository
 import com.lonx.lyrico.data.repository.SettingsRepository
+import com.lonx.lyrico.data.model.entity.ArtistEntity
 import com.lonx.lyrico.utils.SafDocuments
 import com.lonx.lyrico.utils.UriUtils
 import com.lonx.lyrico.utils.coil.ArtistPosterMatcher
@@ -20,7 +25,13 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-data class ArtistPosterFile(val uri: String, val name: String, val lastModified: Long)
+data class ArtistPosterFile(
+    val uri: String,
+    val name: String,
+    val lastModified: Long,
+    val artistId: Long? = null,
+    val artistName: String? = null
+)
 
 data class ArtistPosterFolder(
     val uri: String,
@@ -35,7 +46,9 @@ data class ArtistPosterFoldersUiState(
     val folder: ArtistPosterFolder? = null,
     val isLoading: Boolean = true,
     val error: Boolean = false,
-    val revision: Long = 0L
+    val revision: Long = 0L,
+    val isEditing: Boolean = false,
+    val operationMessage: String? = null
 )
 
 class ArtistPosterFoldersViewModel(
@@ -59,7 +72,7 @@ class ArtistPosterFoldersViewModel(
                     val entry = withContext(Dispatchers.IO) {
                         folder?.let {
                             val uri = folder.toUri()
-                            val posters = readPosters(uri)
+                            val posters = readPosters(uri, artists)
                             ArtistPosterFolder(
                                 uri = folder,
                                 path = UriUtils.getFileAbsolutePath(application, uri)
@@ -82,12 +95,23 @@ class ArtistPosterFoldersViewModel(
         ArtistPosterMatcher.countMatchedFiles(posters.orEmpty().map { it.name }, artistNames)
 
     /** `null` when the folder cannot be queried any more (deleted or access revoked). */
-    private fun readPosters(uri: Uri): List<ArtistPosterFile>? =
-        SafDocuments.children(application, uri)
+    private fun readPosters(uri: Uri, artists: List<ArtistEntity>): List<ArtistPosterFile>? {
+        return SafDocuments.children(application, uri)
             ?.filterNot { it.isDirectory }
             ?.filter { ArtistPosterMatcher.isPosterFile(it.displayName) }
-            ?.map { ArtistPosterFile(uri = it.uri.toString(), name = it.displayName, lastModified = it.lastModified) }
+            ?.map { file ->
+                val matches = artists.mapNotNull { artist ->
+                    ArtistPosterMatcher.rank(file.displayName, artist.name)?.let { it to artist }
+                }
+                val bestRank = matches.minOfOrNull { it.first }
+                val owner = matches.filter { it.first == bestRank }.singleOrNull()?.second
+                ArtistPosterFile(
+                    uri = file.uri.toString(), name = file.displayName,
+                    lastModified = file.lastModified, artistId = owner?.id, artistName = owner?.name
+                )
+            }
             ?.sortedBy { it.name.lowercase() }
+    }
 
     private fun update(action: suspend () -> Unit) {
         viewModelScope.launch {
@@ -113,4 +137,60 @@ class ArtistPosterFoldersViewModel(
     }
 
     fun refresh() = update { settings.refreshArtistPosters() }
+
+    fun clearOperationMessage() { _uiState.update { it.copy(operationMessage = null) } }
+
+    private fun editFile(file: ArtistPosterFile, action: (Uri, List<com.lonx.lyrico.utils.SafDocumentRow>) -> Unit) {
+        if (_uiState.value.isEditing) return
+        val folder = _uiState.value.folder?.uri ?: return
+        _uiState.update { it.copy(isEditing = true, operationMessage = null) }
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    val tree = folder.toUri()
+                    val children = SafDocuments.children(application, tree) ?: error("Folder unavailable")
+                    check(children.any { it.uri.toString() == file.uri && it.displayName == file.name }) { "File changed" }
+                    action(tree, children)
+                }
+                settings.refreshArtistPosters()
+            } catch (e: CancellationException) { throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(operationMessage = application.getString(R.string.poster_operation_failed)) }
+            } finally {
+                _uiState.update { it.copy(isEditing = false) }
+            }
+        }
+    }
+
+    fun deleteFile(file: ArtistPosterFile) = editFile(file) { _, _ ->
+        check(DocumentsContract.deleteDocument(application.contentResolver, file.uri.toUri()))
+    }
+
+    fun renameFile(file: ArtistPosterFile, stem: String) = editFile(file) { _, children ->
+        val name = com.lonx.lyrico.domain.poster.PosterFileEditNames.rename(
+            file.name, stem, children.filter { it.uri.toString() != file.uri }.map { it.displayName }
+        ) ?: error("Invalid or duplicate name")
+        if (name != file.name) checkNotNull(DocumentsContract.renameDocument(application.contentResolver, file.uri.toUri(), name))
+    }
+
+    fun readBitmap(file: ArtistPosterFile, onReady: (Bitmap) -> Unit) {
+        if (_uiState.value.isEditing) return
+        _uiState.update { it.copy(isEditing = true, operationMessage = null) }
+        viewModelScope.launch {
+            try {
+                val bitmap = withContext(Dispatchers.IO) {
+                    application.contentResolver.openInputStream(file.uri.toUri())?.use { BitmapFactory.decodeStream(it) }
+                } ?: error("Cannot decode image")
+                onReady(bitmap)
+            } catch (e: CancellationException) { throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(operationMessage = application.getString(R.string.msg_read_artist_image_failed)) }
+            } finally { _uiState.update { it.copy(isEditing = false) } }
+        }
+    }
+
+    fun cropFile(file: ArtistPosterFile, bitmap: Bitmap) = editFile(file) { tree, _ ->
+        com.lonx.lyrico.utils.ArtistPosterFileWriter.replaceFile(application, tree, file.uri.toUri(), file.name, bitmap)
+    }
+
 }

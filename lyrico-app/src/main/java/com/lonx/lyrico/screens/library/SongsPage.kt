@@ -1,5 +1,7 @@
 package com.lonx.lyrico.screens.library
 
+import top.yukonga.miuix.kmp.icon.extended.Refresh
+import top.yukonga.miuix.kmp.icon.extended.AddFolder
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -36,6 +38,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.lonx.lyrico.ui.components.library.SelectableLibraryItem
 import com.lonx.lyrico.R
 import com.lonx.lyrico.data.model.entity.SongEntity
 import com.lonx.lyrico.screens.SECTIONS_ASC
@@ -47,7 +50,8 @@ import com.lonx.lyrico.ui.components.bar.rememberAlphabetSideBarScrollController
 import com.lonx.lyrico.ui.components.blur.BlurredTopBar
 import com.lonx.lyrico.ui.components.blur.blurSource
 import com.lonx.lyrico.ui.components.blur.rememberBarBlurBackdrop
-import com.lonx.lyrico.ui.components.library.LibraryEmptyState
+import com.lonx.lyrico.ui.components.library.EmptyStateKind
+import com.lonx.lyrico.ui.components.library.IllustratedEmptyState
 import com.lonx.lyrico.ui.components.library.LocalLibraryBottomContentPadding
 import com.lonx.lyrico.ui.components.library.libraryOverlayInsets
 import com.lonx.lyrico.ui.components.library.libraryScrollbarOverlay
@@ -55,8 +59,7 @@ import com.lonx.lyrico.ui.components.scaffoldContentPadding
 import com.lonx.lyrico.ui.components.scaffoldTopHorizontalPadding
 import com.lonx.lyrico.ui.components.song.LibraryScanProgressText
 import com.lonx.lyrico.ui.components.song.SongActionSheets
-import com.lonx.lyrico.ui.components.song.SongListEmptyState
-import com.lonx.lyrico.ui.components.song.SongListItem
+import com.lonx.lyrico.ui.components.song.SongListItemContent
 import com.lonx.lyrico.ui.components.song.SongListItemActions
 import com.lonx.lyrico.utils.UriUtils
 import com.lonx.lyrico.viewmodel.SongListViewModel
@@ -330,22 +333,22 @@ fun SongsPage(
                         }
 
                         !hasFolders -> {
-                            SongListEmptyState(
-                                onAddFolder = { folderPickerLauncher.launch(null) }
+                            IllustratedEmptyState(
+                                kind = EmptyStateKind.Songs,
+                                title = stringResource(R.string.song_list_empty_title),
+                                icon = MiuixIcons.AddFolder,
+                                actionText = stringResource(R.string.action_add_folder),
+                                onAction = { folderPickerLauncher.launch(null) },
                             )
                         }
 
                         else -> {
-                            LibraryEmptyState(
+                            IllustratedEmptyState(
+                                kind = EmptyStateKind.Songs,
                                 title = stringResource(R.string.empty_songs_title),
-                                summary = stringResource(R.string.empty_library_index_summary),
-                                action = {
-                                    TextButton(
-                                        text = stringResource(R.string.refresh),
-                                        onClick = { viewModel.refreshSongs() },
-                                        colors = MiuixButtonDefaults.textButtonColorsPrimary()
-                                    )
-                                }
+                                icon = MiuixIcons.Refresh,
+                                actionText = stringResource(R.string.refresh),
+                                onAction = { viewModel.refreshSongs() },
                             )
                         }
                     }
@@ -379,8 +382,8 @@ fun SongsPage(
                                     ?: "song-${song.id}"
                             }
                         ) { song ->
-                            SongListItem(
-                                song = song,
+                            SelectableLibraryItem(
+                                itemKey = song.uri,
                                 modifier = Modifier.animateItem(),
                                 isSelectionMode = isSelectionMode,
                                 isSelected = selectedSongUris.contains(song.uri),
@@ -394,23 +397,27 @@ fun SongsPage(
                                 },
                                 onSwipeSelection = {
                                     selectionViewModel.swipeSelect(song, songs)
-                                },
-                                trailingContent = {
-                                    Box(modifier = Modifier.padding(end = 8.dp)) {
-                                        SongListItemActions(
-                                            isSelectionMode = isSelectionMode,
-                                            isSelected = selectedSongUris.contains(song.uri),
-                                            onToggleSelection = {
-                                                selectionViewModel.toggleSelection(song.uri)
-                                            },
-                                            onShowMenu = {
-                                                showMenuSheet = true
-                                                selectedSong = song
-                                            }
-                                        )
-                                    }
                                 }
-                            )
+                            ) {
+                                SongListItemContent(
+                                    song = song,
+                                    trailingContent = {
+                                        Box(modifier = Modifier.padding(end = 8.dp)) {
+                                            SongListItemActions(
+                                                isSelectionMode = isSelectionMode,
+                                                isSelected = selectedSongUris.contains(song.uri),
+                                                onToggleSelection = {
+                                                    selectionViewModel.toggleSelection(song.uri)
+                                                },
+                                                onShowMenu = {
+                                                    showMenuSheet = true
+                                                    selectedSong = song
+                                                }
+                                            )
+                                        }
+                                    }
+                                )
+                            }
                         }
                     }
                 }

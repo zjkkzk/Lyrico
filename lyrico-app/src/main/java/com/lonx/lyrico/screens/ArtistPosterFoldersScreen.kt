@@ -1,12 +1,10 @@
 package com.lonx.lyrico.screens
 
+import top.yukonga.miuix.kmp.icon.extended.AddFolder
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.*
@@ -14,14 +12,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lonx.lyrico.R
+import com.lonx.lyrico.ui.components.library.EmptyStateKind
+import com.lonx.lyrico.ui.components.library.IllustratedEmptyState
 import com.lonx.lyrico.ui.components.blur.BlurredTopBar
 import com.lonx.lyrico.ui.components.blur.blurSource
 import com.lonx.lyrico.ui.components.blur.rememberBarBlurBackdrop
@@ -30,16 +27,19 @@ import com.lonx.lyrico.viewmodel.ArtistPosterFoldersViewModel
 import com.ramcosta.composedestinations.annotation.Destination
 import com.ramcosta.composedestinations.annotation.RootGraph
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
+import com.ramcosta.composedestinations.generated.destinations.ArtistDetailDestination
 import dev.jeziellago.compose.markdowntext.MarkdownText
 import org.koin.androidx.compose.koinViewModel
 import top.yukonga.miuix.kmp.basic.*
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Back
-import top.yukonga.miuix.kmp.icon.extended.Image
 import top.yukonga.miuix.kmp.icon.extended.More
 import top.yukonga.miuix.kmp.menu.OverlayIconDropdownMenu
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.window.WindowDialog
+import top.yukonga.miuix.kmp.preference.ArrowPreference
+import com.lonx.lyrico.viewmodel.ArtistPosterFile
+import com.lonx.lyrico.ui.components.base.YesNoDialog
 
 @Composable
 @Destination<RootGraph>(route = "artist_poster_folders")
@@ -61,6 +61,19 @@ fun ArtistPosterFoldersScreen(navigator: DestinationsNavigator) {
     var showRemoveDialog by rememberSaveable { mutableStateOf(false) }
     var showHelp by rememberSaveable { mutableStateOf(false) }
     var showFolderDetails by rememberSaveable { mutableStateOf(false) }
+    var actionFile by remember { mutableStateOf<ArtistPosterFile?>(null) }
+    var showFileMenu by remember { mutableStateOf(false) }
+    var previewUri by remember(state.folder?.uri) { mutableStateOf<String?>(null) }
+    var showDeleteFile by remember { mutableStateOf(false) }
+    var showRenameFile by remember { mutableStateOf(false) }
+    var renameStem by remember { mutableStateOf("") }
+    var cropFile by remember { mutableStateOf<ArtistPosterFile?>(null) }
+    var cropBitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+    var showCrop by remember { mutableStateOf(false) }
+    LaunchedEffect(state.operationMessage) {
+        state.operationMessage?.let { android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_LONG).show() }
+        viewModel.clearOperationMessage()
+    }
     val scrollBehavior = MiuixScrollBehavior()
     val topBarBackdrop = rememberBarBlurBackdrop()
 
@@ -104,7 +117,7 @@ fun ArtistPosterFoldersScreen(navigator: DestinationsNavigator) {
                                     }
                                 }
                             ),
-                            enabled = !state.isLoading
+                            enabled = !state.isLoading && !state.isEditing
                         ) {
                             Icon(MiuixIcons.More, stringResource(R.string.cd_more_actions))
                         }
@@ -121,9 +134,13 @@ fun ArtistPosterFoldersScreen(navigator: DestinationsNavigator) {
                     folder = folder,
                     revision = state.revision,
                     isLoading = state.isLoading,
+                    enabled = !state.isEditing,
                     hasError = state.error,
                     onChangeFolder = { picker.launch(null) },
                     onRefresh = viewModel::refresh,
+                    onFileMenu = { previewUri = null; actionFile = it; showFileMenu = true },
+                    previewUri = previewUri,
+                    onDismissPreview = { previewUri = null },
                     padding = scaffoldContentPadding(padding, horizontalExtra = 12.dp, bottomExtra = 12.dp),
                     scrollBehavior = scrollBehavior
                 )
@@ -133,9 +150,11 @@ fun ArtistPosterFoldersScreen(navigator: DestinationsNavigator) {
                         CircularProgressIndicator()
                     }
                 } else {
-                    ArtistPosterEmptyState(
+                    IllustratedEmptyState(
+                        kind = EmptyStateKind.Folders,
                         title = stringResource(R.string.artist_poster_folder_not_selected),
                         summary = stringResource(if (state.error) R.string.artist_poster_folder_error else R.string.artist_poster_folders_empty),
+                        icon = MiuixIcons.AddFolder,
                         actionText = stringResource(R.string.artist_poster_folder_add),
                         onAction = { picker.launch(null) },
                         modifier = Modifier.fillMaxSize().padding(scaffoldContentPadding(padding))
@@ -143,6 +162,75 @@ fun ArtistPosterFoldersScreen(navigator: DestinationsNavigator) {
                 }
             }
         }
+        val file = actionFile
+        com.lonx.lyrico.ui.components.base.ItemMenuBottomSheet(
+            show = showFileMenu, label = file?.name.orEmpty(), enableNestedScroll = false,
+            onDismissRequest = { showFileMenu = false }
+        ) {
+            ArrowPreference(
+                title = stringResource(R.string.poster_view_artwork),
+                enabled = file != null && !state.isEditing,
+                onClick = { showFileMenu = false; previewUri = file?.uri }
+            )
+            ArrowPreference(
+                title = stringResource(R.string.poster_artist_details),
+                summary = if (file?.artistId == null) stringResource(R.string.poster_artist_unmatched) else null,
+                enabled = file?.artistId != null && !state.isLoading && !state.isEditing,
+                onClick = {
+                    file?.artistId?.let { artistId ->
+                        showFileMenu = false
+                        navigator.navigate(ArtistDetailDestination(artistId = artistId))
+                    }
+                }
+            )
+            ArrowPreference(title = stringResource(R.string.action_rename), enabled = !state.isEditing, onClick = {
+                renameStem = file?.name?.substringBeforeLast('.').orEmpty()
+                showFileMenu = false; showRenameFile = true
+            })
+            if (file?.name?.substringAfterLast('.')?.lowercase() in listOf("jpg", "jpeg", "png", "webp")) {
+                ArrowPreference(title = stringResource(R.string.label_crop_artist_image), enabled = !state.isEditing, onClick = {
+                    showFileMenu = false
+                    cropFile = file
+                    file?.let { viewModel.readBitmap(it) { bitmap -> cropBitmap = bitmap; showCrop = true } }
+                })
+            }
+            ArrowPreference(title = stringResource(R.string.action_delete), enabled = !state.isEditing,
+                titleColor = BasicComponentColors(MiuixTheme.colorScheme.error, MiuixTheme.colorScheme.disabledOnSecondaryVariant),
+                onClick = { showFileMenu = false; showDeleteFile = true })
+        }
+        YesNoDialog(
+            show = showDeleteFile && file != null, title = stringResource(R.string.dialog_delete_file_title),
+            summary = stringResource(R.string.dialog_delete_file_content, file?.name.orEmpty()),
+            onDismissRequest = { showDeleteFile = false },
+            onConfirm = { file?.let(viewModel::deleteFile) }
+        )
+        val proposedName = file?.let { target ->
+            com.lonx.lyrico.domain.poster.PosterFileEditNames.rename(target.name, renameStem,
+                state.folder?.posters.orEmpty().filter { it.uri != target.uri }.map { it.name })
+        }
+        YesNoDialog(
+            show = showRenameFile && file != null, title = stringResource(R.string.dialog_rename_title),
+            confirmEnabled = proposedName != null && proposedName != file?.name && !state.isEditing,
+            onDismissRequest = { showRenameFile = false },
+            onConfirm = { file?.let { viewModel.renameFile(it, renameStem) } },
+            content = {
+                TextField(value = renameStem, onValueChange = { renameStem = it }, maxLines = 1,
+                    modifier = Modifier.fillMaxWidth(), trailingIcon = {
+                        Text(".${file?.name?.substringAfterLast('.').orEmpty()}", modifier = Modifier.padding(horizontal = 12.dp))
+                    })
+                Text(stringResource(R.string.poster_rename_hint), style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(top = 8.dp))
+                if (proposedName == null) Text(stringResource(R.string.poster_rename_invalid),
+                    style = MiuixTheme.textStyles.footnote1, color = MiuixTheme.colorScheme.error,
+                    modifier = Modifier.padding(top = 8.dp))
+            }
+        )
+        com.lonx.lyrico.ui.components.crop.ImageCropperSheet(
+            show = showCrop, bitmap = cropBitmap, title = stringResource(R.string.label_crop_artist_image),
+            onCrop = { bitmap -> cropFile?.let { viewModel.cropFile(it, bitmap) } },
+            onDismissRequest = { showCrop = false },
+            onDismissFinished = { if (!showCrop) { cropBitmap = null; cropFile = null } }
+        )
         WindowDialog(
             title = stringResource(R.string.artist_poster_naming),
             show = showHelp,
@@ -220,70 +308,6 @@ fun ArtistPosterFoldersScreen(navigator: DestinationsNavigator) {
                     }
                 }
             }
-        }
-    }
-}
-
-@Composable
-internal fun ArtistPosterEmptyState(
-    title: String,
-    summary: String,
-    actionText: String,
-    onAction: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Box(modifier, contentAlignment = Alignment.Center) {
-        Column(
-            modifier = Modifier.widthIn(max = 420.dp).fillMaxWidth()
-                .verticalScroll(rememberScrollState()).padding(28.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            ArtistPosterEmptyIllustration()
-            Spacer(Modifier.height(28.dp))
-            Text(
-                title,
-                style = MiuixTheme.textStyles.title4,
-                textAlign = TextAlign.Center
-            )
-            Text(summary, style = MiuixTheme.textStyles.body2,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                textAlign = TextAlign.Center, modifier = Modifier.padding(top = 8.dp))
-            Spacer(Modifier.height(20.dp))
-            TextButton(text = actionText, onClick = onAction,
-                modifier = Modifier.widthIn(min = 180.dp).heightIn(min = 48.dp),
-                colors = ButtonDefaults.textButtonColorsPrimary())
-        }
-    }
-}
-
-@Composable
-private fun ArtistPosterEmptyIllustration() {
-    val colors = MiuixTheme.colorScheme
-    val frameShape = RoundedCornerShape(16.dp)
-    Box(Modifier.size(width = 188.dp, height = 152.dp), contentAlignment = Alignment.Center) {
-        Box(Modifier.offset(x = (-22).dp, y = 6.dp).graphicsLayer { rotationZ = -12f }
-            .size(width = 100.dp, height = 126.dp)
-            .background(colors.primary.copy(alpha = 0.08f), frameShape)
-            .border(1.dp, colors.primary.copy(alpha = 0.12f), frameShape))
-        Box(Modifier.offset(x = 22.dp, y = 6.dp).graphicsLayer { rotationZ = 12f }
-            .size(width = 100.dp, height = 126.dp)
-            .background(colors.primary.copy(alpha = 0.12f), frameShape)
-            .border(1.dp, colors.primary.copy(alpha = 0.16f), frameShape))
-        Column(
-            Modifier.size(width = 108.dp, height = 136.dp)
-                .shadow(4.dp, frameShape).background(colors.surfaceContainer, frameShape)
-                .border(1.dp, colors.primary.copy(alpha = 0.12f), frameShape).padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(9.dp)
-        ) {
-            Box(Modifier.fillMaxWidth().aspectRatio(1f)
-                .background(colors.primary.copy(alpha = 0.1f), RoundedCornerShape(8.dp)),
-                contentAlignment = Alignment.Center) {
-                Icon(MiuixIcons.Image, null, tint = colors.primary, modifier = Modifier.size(40.dp))
-            }
-            Box(Modifier.fillMaxWidth(0.7f).height(5.dp)
-                .background(colors.onSurface.copy(alpha = 0.16f), RoundedCornerShape(3.dp)))
-            Box(Modifier.fillMaxWidth(0.45f).height(4.dp)
-                .background(colors.onSurface.copy(alpha = 0.08f), RoundedCornerShape(3.dp)))
         }
     }
 }

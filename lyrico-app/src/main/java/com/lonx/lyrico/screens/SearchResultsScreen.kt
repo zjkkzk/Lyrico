@@ -59,6 +59,8 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import com.lonx.lyrico.R
+import com.lonx.lyrico.ui.components.library.EmptyStateKind
+import com.lonx.lyrico.ui.components.library.IllustratedEmptyState
 import com.lonx.lyrico.data.model.SearchSourceTabStyle
 import com.lonx.lyrico.data.model.lyrics.SongSearchResult
 import com.lonx.lyrico.data.model.metadata.MetadataFieldTarget
@@ -244,12 +246,11 @@ fun SearchResultsScreen(
             }
 
             if (uiState.availableSources.isEmpty()) {
-                Box(
+                IllustratedEmptyState(
+                    kind = EmptyStateKind.Plugins,
+                    title = stringResource(R.string.plugin_empty),
                     modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(stringResource(R.string.plugin_empty))
-                }
+                )
                 return@Column
             }
 
@@ -341,9 +342,11 @@ fun SearchResultsScreen(
                     }
 
                     results.isEmpty() -> {
-                        Box(Modifier.fillMaxSize(), Alignment.Center) {
-                            Text(stringResource(id = R.string.cd_no_results))
-                        }
+                        IllustratedEmptyState(
+                            kind = EmptyStateKind.Search,
+                            title = stringResource(R.string.search_no_results),
+                            modifier = Modifier.fillMaxSize(),
+                        )
                     }
 
                     else -> {
@@ -1087,18 +1090,11 @@ private fun SearchResultApplyDataPage(
     ) {
         if (options.isEmpty()) {
             item("empty") {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(120.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = stringResource(R.string.search_no_results),
-                        style = MiuixTheme.textStyles.body2,
-                        color = MiuixTheme.colorScheme.onSurfaceContainerVariant
-                    )
-                }
+                IllustratedEmptyState(
+                    kind = EmptyStateKind.Search,
+                    title = stringResource(R.string.search_no_results),
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         } else {
             items(options, key = { it.target.name }) { option ->
