@@ -22,6 +22,9 @@ import com.lonx.lyrico.data.model.FloatingBarEffect
 import com.lonx.lyrico.data.model.ReplayGainPeakMode
 import com.lonx.lyrico.data.model.ReplayGainSettings
 import com.lonx.lyrico.data.model.lyrics.LyricFormat
+import com.lonx.lyrico.data.model.lyrics.LyricLineTrack
+import com.lonx.lyrico.data.model.lyrics.DefaultLyricLineOrder
+import com.lonx.lyrico.data.model.lyrics.normalizedLyricLineOrder
 import com.lonx.lyrico.data.model.lyrics.LyricRenderConfig
 import com.lonx.lyrico.data.model.lyrics.LyricsProcessingOptions
 import com.lonx.lyrico.data.model.log.LogRetentionOption
@@ -31,6 +34,7 @@ import com.lonx.lyrico.data.model.SearchSourceTabStyle
 import com.lonx.lyrico.data.model.SettingsBackup
 import com.lonx.lyrico.data.model.SourceSettingsStore
 import com.lonx.lyrico.data.model.ThemeConfig
+import com.lonx.lyrico.data.model.UiEngine
 import com.lonx.lyrico.data.model.ThemeMode
 import com.lonx.lyrico.data.model.AlbumSortBy
 import com.lonx.lyrico.data.model.AlbumSortInfo
@@ -86,6 +90,7 @@ object SettingsDefaults {
     val ARTIST_SORT_ORDER = SortOrder.ASC
     const val ALBUM_GRID_COLUMNS = 2
     const val SEPARATOR = "/"
+    val LYRIC_LINE_ORDER = DefaultLyricLineOrder
     const val ROMA_ENABLED = true
     const val TRANSLATION_ENABLED = true
     const val CHECK_UPDATE_ENABLED = true
@@ -156,6 +161,7 @@ class SettingsRepositoryImpl(private val context: Context) : SettingsRepository 
         val ARTIST_SORT_ORDER = stringPreferencesKey("artist_sort_order")
         val ALBUM_GRID_COLUMNS = intPreferencesKey("album_grid_columns")
         val SEPARATOR = stringPreferencesKey("separator")
+        val LYRIC_LINE_ORDER = stringPreferencesKey("lyric_line_order")
         val ROMA_ENABLED = booleanPreferencesKey("roma_enabled")
         val CHECK_UPDATE_ENABLED = booleanPreferencesKey("check_update_enabled")
         val TRANSLATION_ENABLED = booleanPreferencesKey("translation_enabled")
@@ -167,6 +173,7 @@ class SettingsRepositoryImpl(private val context: Context) : SettingsRepository 
         val SEARCH_SOURCE_TAB_STYLE = stringPreferencesKey("search_source_tab_style")
         val SHOW_ALL_SEARCH_RESULT_FIELDS = booleanPreferencesKey("show_all_search_result_fields")
         val THEME_MODE = stringPreferencesKey("theme_mode")
+        val UI_ENGINE = stringPreferencesKey("ui_engine")
         val MONET_ENABLE = booleanPreferencesKey("monet_enable")
         val FLOATING_BOTTOM_BAR_ENABLED = booleanPreferencesKey("floating_bottom_bar_enabled")
         val BAR_BLUR_ENABLED = booleanPreferencesKey("bar_blur_enabled")
@@ -276,6 +283,11 @@ class SettingsRepositoryImpl(private val context: Context) : SettingsRepository 
             preferences[PreferencesKeys.ROMA_ENABLED] ?: SettingsDefaults.ROMA_ENABLED
         }
 
+    override val lyricLineOrder: Flow<List<LyricLineTrack>>
+        get() = context.settingsDataStore.data.map { preferences ->
+            decodeLyricLineOrder(preferences[PreferencesKeys.LYRIC_LINE_ORDER])
+        }
+
     override val translationEnabled: Flow<Boolean>
         get() = context.settingsDataStore.data.map { preferences ->
             preferences[PreferencesKeys.TRANSLATION_ENABLED] ?: SettingsDefaults.TRANSLATION_ENABLED
@@ -341,6 +353,15 @@ class SettingsRepositoryImpl(private val context: Context) : SettingsRepository 
                 ?: SettingsDefaults.SHOW_ALL_SEARCH_RESULT_FIELDS
         }
 
+    override val uiEngine: Flow<UiEngine>
+        get() = context.settingsDataStore.data.map { preferences ->
+            UiEngine.fromValue(preferences[PreferencesKeys.UI_ENGINE])
+        }
+
+    override suspend fun saveUiEngine(engine: UiEngine) {
+        context.settingsDataStore.edit { it[PreferencesKeys.UI_ENGINE] = engine.value }
+    }
+
     override val themeMode: Flow<ThemeMode>
         get() = context.settingsDataStore.data.map { preferences ->
             val modeName = preferences[PreferencesKeys.THEME_MODE]
@@ -356,11 +377,9 @@ class SettingsRepositoryImpl(private val context: Context) : SettingsRepository 
         }
     override val keyColor: Flow<KeyColor>
         get() = context.settingsDataStore.data.map { preferences ->
-            // 检查 DataStore 中是否有保存颜色的 Key
             if (preferences.contains(PreferencesKeys.KEY_THEME_COLOR)) {
                 val savedColorInt = preferences[PreferencesKeys.KEY_THEME_COLOR]!!
                 val savedColor = Color(savedColorInt)
-                // 查找对应的颜色，找不到则返回默认项(第一个)
                 KeyColors.find { it.color == savedColor } ?: KeyColors.first()
             } else {
                 // 如果没有保存过，说明是“系统默认”
@@ -385,8 +404,7 @@ class SettingsRepositoryImpl(private val context: Context) : SettingsRepository 
         get() = context.settingsDataStore.data.map { it.resolveFloatingBarEffect() }
 
     /**
-     * 读取悬浮导航栏效果。新键缺失时回退到旧版的两个互斥开关，
-     * 让已经开过毛玻璃/液态玻璃的用户在升级后保留原来的选择。
+     * 新键缺失时回退到旧版的两个互斥开关，保留老用户升级前的选择。
      */
     private fun Preferences.resolveFloatingBarEffect(): FloatingBarEffect =
         this[PreferencesKeys.FLOATING_BAR_EFFECT]
@@ -458,12 +476,14 @@ class SettingsRepositoryImpl(private val context: Context) : SettingsRepository 
         combine(
             lyricFormat,
             romaEnabled,
-            translationEnabled
-        ) { format, roma, translation ->
+            translationEnabled,
+            lyricLineOrder
+        ) { format, roma, translation, lineOrder ->
             LyricRenderConfig(
                 format = format,
                 showRomanization = roma,
-                showTranslation = translation
+                showTranslation = translation,
+                lineOrder = lineOrder
             )
         }
 
@@ -575,6 +595,13 @@ class SettingsRepositoryImpl(private val context: Context) : SettingsRepository 
     override suspend fun saveRomaEnabled(enabled: Boolean) {
         context.settingsDataStore.edit { preferences ->
             preferences[PreferencesKeys.ROMA_ENABLED] = enabled
+        }
+    }
+
+    override suspend fun saveLyricLineOrder(order: List<LyricLineTrack>) {
+        context.settingsDataStore.edit { preferences ->
+            preferences[PreferencesKeys.LYRIC_LINE_ORDER] =
+                order.normalizedLyricLineOrder().joinToString(",") { it.name }
         }
     }
 
@@ -695,7 +722,6 @@ class SettingsRepositoryImpl(private val context: Context) : SettingsRepository 
                 // 如果选了“系统默认”，直接移除保存的值
                 preferences.remove(PreferencesKeys.KEY_THEME_COLOR)
             } else {
-                // 否则保存颜色具体的 ARGB 值
                 preferences[PreferencesKeys.KEY_THEME_COLOR] = selectedKeyColor.color.toArgb()
             }
         }
@@ -748,6 +774,7 @@ class SettingsRepositoryImpl(private val context: Context) : SettingsRepository 
             showRomanization = roma,
             removeEmptyLines = removeEmptyLines,
             showTranslation = showTranslation,
+            lineOrder = decodeLyricLineOrder(prefs[PreferencesKeys.LYRIC_LINE_ORDER]),
             onlyTranslationIfAvailable = onlyTranslationIfAvailable,
             conversionMode = conversionMode
         )
@@ -792,6 +819,8 @@ class SettingsRepositoryImpl(private val context: Context) : SettingsRepository 
             separator = prefs[PreferencesKeys.SEPARATOR]
                 ?: SettingsDefaults.SEPARATOR,
 
+            lyricLineOrder = decodeLyricLineOrder(prefs[PreferencesKeys.LYRIC_LINE_ORDER]).map { it.name },
+
             romaEnabled = prefs[PreferencesKeys.ROMA_ENABLED]
                 ?: SettingsDefaults.ROMA_ENABLED,
 
@@ -821,6 +850,7 @@ class SettingsRepositoryImpl(private val context: Context) : SettingsRepository 
             showAllSearchResultFields = prefs[PreferencesKeys.SHOW_ALL_SEARCH_RESULT_FIELDS]
                 ?: SettingsDefaults.SHOW_ALL_SEARCH_RESULT_FIELDS,
 
+            uiEngine = UiEngine.fromValue(prefs[PreferencesKeys.UI_ENGINE]).value,
             themeMode = prefs[PreferencesKeys.THEME_MODE]
                 ?: SettingsDefaults.THEME_MODE.name,
             monetEnable = prefs[PreferencesKeys.MONET_ENABLE]
@@ -878,6 +908,10 @@ class SettingsRepositoryImpl(private val context: Context) : SettingsRepository 
                 }
                 backup.separator?.let { prefs[PreferencesKeys.SEPARATOR] = it }
                 backup.romaEnabled?.let { prefs[PreferencesKeys.ROMA_ENABLED] = it }
+                backup.lyricLineOrder?.let { names ->
+                    prefs[PreferencesKeys.LYRIC_LINE_ORDER] =
+                        decodeLyricLineOrder(names.joinToString(",")).joinToString(",") { it.name }
+                }
 
                 backup.checkUpdateEnabled?.let { prefs[PreferencesKeys.CHECK_UPDATE_ENABLED] = it }
                 backup.translationEnabled?.let { prefs[PreferencesKeys.TRANSLATION_ENABLED] = it }
@@ -895,9 +929,8 @@ class SettingsRepositoryImpl(private val context: Context) : SettingsRepository 
                     prefs[PreferencesKeys.SEARCH_SOURCE_ORDER] = list.idsToCsv()
                 }
                 
-                // 处理启用的搜索源：如果为null或为空，默认启用所有源
+                // 启用源为 null 或空时回落到默认列表
                 if (backup.enabledSearchSources.isNullOrEmpty()) {
-                    // 默认启用所有源
                     prefs[PreferencesKeys.ENABLED_SEARCH_SOURCES] =
                         SettingsDefaults.DEFAULT_ENABLED_SEARCH_SOURCES.idsToCsv()
                 } else {
@@ -915,6 +948,7 @@ class SettingsRepositoryImpl(private val context: Context) : SettingsRepository 
                 backup.showAllSearchResultFields?.let {
                     prefs[PreferencesKeys.SHOW_ALL_SEARCH_RESULT_FIELDS] = it
                 }
+                backup.uiEngine?.let { prefs[PreferencesKeys.UI_ENGINE] = UiEngine.fromValue(it).value }
                 backup.themeMode?.let { prefs[PreferencesKeys.THEME_MODE] = it }
                 backup.monetEnable?.let { prefs[PreferencesKeys.MONET_ENABLE] = it }
                 backup.floatingBottomBarEnabled?.let {
@@ -1246,6 +1280,16 @@ class SettingsRepositoryImpl(private val context: Context) : SettingsRepository 
             .map { it.trim() }
             .filter { it.isNotEmpty() }
             .distinct()
+    }
+
+    private fun decodeLyricLineOrder(raw: String?): List<LyricLineTrack> {
+        if (raw.isNullOrBlank()) return SettingsDefaults.LYRIC_LINE_ORDER
+        return raw
+            .split(',', '\n', ';')
+            .mapNotNull { name ->
+                runCatching { LyricLineTrack.valueOf(name.trim()) }.getOrNull()
+            }
+            .normalizedLyricLineOrder()
     }
 
     private fun String.toStableSourceId(): String {

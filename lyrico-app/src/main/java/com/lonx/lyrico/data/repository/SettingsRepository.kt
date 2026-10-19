@@ -7,12 +7,14 @@ import com.lonx.lyrico.data.model.FloatingBarEffect
 import com.lonx.lyrico.data.model.ReplayGainPeakMode
 import com.lonx.lyrico.data.model.ReplayGainSettings
 import com.lonx.lyrico.data.model.lyrics.LyricFormat
+import com.lonx.lyrico.data.model.lyrics.LyricLineTrack
 import com.lonx.lyrico.data.model.lyrics.LyricRenderConfig
 import com.lonx.lyrico.data.model.log.LogRetentionOption
 import com.lonx.lyrico.data.model.plugin.PluginMetadataFieldWriteRule
 import com.lonx.lyrico.data.model.SearchConfig
 import com.lonx.lyrico.data.model.SearchSourceTabStyle
 import com.lonx.lyrico.data.model.ThemeConfig
+import com.lonx.lyrico.data.model.UiEngine
 import com.lonx.lyrico.data.model.ThemeMode
 import com.lonx.lyrico.data.model.AlbumSortInfo
 import com.lonx.lyrico.data.model.ArtistSortInfo
@@ -42,6 +44,7 @@ interface SettingsRepository {
     val artistSortInfo: Flow<ArtistSortInfo>
     val albumGridColumns: Flow<Int>
     val separator: Flow<String>
+    val lyricLineOrder: Flow<List<LyricLineTrack>>
     val romaEnabled: Flow<Boolean>
 
     val conversionMode: Flow<ConversionMode>
@@ -56,6 +59,8 @@ interface SettingsRepository {
     val searchPageSize: Flow<Int>
     val searchSourceTabStyle: Flow<SearchSourceTabStyle>
     val showAllSearchResultFields: Flow<Boolean>
+    val uiEngine: Flow<UiEngine>
+    suspend fun saveUiEngine(engine: UiEngine)
     val themeMode: Flow<ThemeMode>
     val keyColor: Flow<KeyColor>
     val monetEnable: Flow<Boolean>
@@ -84,6 +89,7 @@ interface SettingsRepository {
     suspend fun saveArtistSortInfo(sortInfo: ArtistSortInfo)
     suspend fun saveAlbumGridColumns(columns: Int)
     suspend fun saveSeparator(separator: String)
+    suspend fun saveLyricLineOrder(order: List<LyricLineTrack>)
     suspend fun saveRomaEnabled(enabled: Boolean)
     suspend fun saveConversionMode(mode: ConversionMode)
     suspend fun saveCheckUpdateEnabled(enabled: Boolean)
