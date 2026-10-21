@@ -77,7 +77,7 @@ import com.lonx.lyrico.ui.components.miuix.MiuixBottomSheet
 import com.moriafly.salt.ui.RoundedColumn
 import com.moriafly.salt.ui.SaltTheme
 import com.moriafly.salt.ui.Switcher
-import com.moriafly.salt.ui.dialog.YesNoDialog as SaltYesNoDialog
+import com.lonx.lyrico.ui.components.salt.SaltConfirmDialog
 import com.moriafly.salt.ui.innerPadding
 import com.moriafly.salt.ui.outerPadding
 import com.moriafly.salt.ui.popup.PopupMenu
@@ -110,6 +110,8 @@ import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 import top.yukonga.miuix.kmp.window.WindowDialog
 import top.yukonga.miuix.kmp.window.WindowListPopup
+import androidx.compose.foundation.text.input.TextFieldLineLimits
+import androidx.compose.foundation.text.input.TextFieldState
 
 /** 内置字段与自定义标签共用一份可排序列表。 */
 @Composable
@@ -326,9 +328,9 @@ fun EditFieldSettingsScreen(
     )
 
     if (salt) {
-        if (pendingDeleteKey != null) SaltYesNoDialog(
+        if (pendingDeleteKey != null) SaltConfirmDialog(
             title = stringResource(R.string.custom_tag_delete_title),
-            content = stringResource(R.string.custom_tag_delete_message, pendingDeleteKey.orEmpty()),
+            summary = stringResource(R.string.custom_tag_delete_message, pendingDeleteKey.orEmpty()),
             onDismissRequest = { pendingDeleteKey = null },
             onConfirm = {
                 pendingDeleteKey?.let(viewModel::removeCustomTag)
@@ -337,9 +339,9 @@ fun EditFieldSettingsScreen(
             cancelText = stringResource(R.string.cancel),
             confirmText = stringResource(R.string.common_delete),
         )
-        if (showResetDialog) SaltYesNoDialog(
+        if (showResetDialog) SaltConfirmDialog(
             title = stringResource(R.string.reset_to_default),
-            content = stringResource(R.string.edit_field_settings_reset_message),
+            summary = stringResource(R.string.edit_field_settings_reset_message),
             onDismissRequest = { showResetDialog = false },
             onConfirm = {
                 viewModel.resetAll()
@@ -758,7 +760,8 @@ private fun AddCustomTagDialog(
     onDismissFinished: () -> Unit,
     onConfirm: (String) -> Unit,
 ) {
-    var typed by remember(show) { mutableStateOf("") }
+    val inputState = remember(show) { TextFieldState("") }
+    val typed = inputState.text.toString()
 
     if (LocalUiEngine.current == UiEngine.SALT) {
         // Salt 弹窗同步销毁，用“曾显示”标记在关闭后补发一次完成回调。
@@ -815,8 +818,7 @@ private fun AddCustomTagDialog(
             Spacer(Modifier.height(16.dp))
             RoundedColumn(paddingValues = PaddingValues(0.dp)) {
                 SaltTextInput(
-                    text = typed,
-                    onChange = { typed = it },
+                    state = inputState,
                     hint = stringResource(R.string.custom_tag_key),
                 )
             }
@@ -867,10 +869,10 @@ private fun AddCustomTagDialog(
 
             Spacer(Modifier.height(16.dp))
             TextField(
-                value = typed,
-                onValueChange = { typed = it },
+                state = inputState,
                 label = stringResource(R.string.custom_tag_key),
                 modifier = Modifier.fillMaxWidth(),
+                lineLimits = TextFieldLineLimits.MultiLine(),
             )
             Spacer(Modifier.height(6.dp))
             Text(

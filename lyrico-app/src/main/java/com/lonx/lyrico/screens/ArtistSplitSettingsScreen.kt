@@ -90,6 +90,8 @@ import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.window.WindowDialog
+import androidx.compose.foundation.text.input.TextFieldLineLimits
+import androidx.compose.foundation.text.input.TextFieldState
 
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
@@ -569,37 +571,38 @@ private fun ArtistSplitInputDialog(
     onSave: (String) -> Unit,
     onDelete: () -> Unit = {}
 ) {
-    var text by remember(show, initialValue) { mutableStateOf(initialValue) }
+    val inputState = remember(show, initialValue) { TextFieldState(initialValue) }
+    val text = inputState.text.toString()
 
     if (LocalUiEngine.current == UiEngine.SALT) {
         if (show) com.lonx.lyrico.ui.components.salt.SaltBasicDialog(onDismissRequest = onDismiss) {
             val focusRequester = remember { FocusRequester() }
             LaunchedEffect(Unit) { focusRequester.requestFocus() }
             Column(Modifier.fillMaxWidth().weight(1f, fill = false).verticalScroll(rememberScrollState())) {
-                com.moriafly.salt.ui.dialog.DialogTitle(title)
+                com.lonx.lyrico.ui.components.salt.SaltDialogTitle(title)
                 com.moriafly.salt.ui.RoundedColumn(paddingValues = PaddingValues(0.dp)) {
                     SaltTextInput(
-                        text = text, onChange = { text = it }, hint = hint,
-                        modifier = Modifier.focusRequester(focusRequester)
+                        state = inputState, hint = hint,
+                        modifier = Modifier.focusRequester(focusRequester),
                     )
                 }
                 ItemTip(hint)
             }
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(16.dp))
             FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End,
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (showDelete) {
-                    com.moriafly.salt.ui.Button(
+                    com.lonx.lyrico.ui.components.salt.SaltDialogButton(
                         text = stringResource(R.string.common_delete), onClick = onDelete,
                         appearance = com.moriafly.salt.ui.ButtonAppearance.Plain,
                         intent = com.moriafly.salt.ui.ButtonIntent.Destructive
                     )
                 }
-                com.moriafly.salt.ui.Button(
+                com.lonx.lyrico.ui.components.salt.SaltDialogButton(
                     text = stringResource(R.string.cancel), onClick = onDismiss,
                     appearance = com.moriafly.salt.ui.ButtonAppearance.Subtle
                 )
-                com.moriafly.salt.ui.Button(
+                com.lonx.lyrico.ui.components.salt.SaltDialogButton(
                     text = stringResource(R.string.confirm), onClick = { onSave(text) },
                 )
             }
@@ -614,9 +617,8 @@ private fun ArtistSplitInputDialog(
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
             TextField(
-                value = text,
-                onValueChange = { text = it },
-                maxLines = 1
+                state = inputState,
+                lineLimits = TextFieldLineLimits.SingleLine,
             )
             Spacer(modifier = Modifier.height(6.dp))
             Text(
@@ -659,9 +661,9 @@ private fun ConfirmRuleDeleteDialog(
 ) {
     if (LocalUiEngine.current == UiEngine.SALT) {
         pendingDelete?.let { rule ->
-            com.moriafly.salt.ui.dialog.YesNoDialog(
+            com.lonx.lyrico.ui.components.salt.SaltConfirmDialog(
                 title = stringResource(R.string.artist_split_delete_rule_title),
-                content = stringResource(R.string.artist_split_delete_rule_message, rule.label),
+                summary = stringResource(R.string.artist_split_delete_rule_message, rule.label),
                 onDismissRequest = onDismiss,
                 onConfirm = { onConfirm(rule) },
                 cancelText = stringResource(R.string.cancel),

@@ -49,6 +49,9 @@ import top.yukonga.miuix.kmp.window.WindowDialog
 import com.lonx.lyrico.ui.components.base.ItemMenuAction
 import com.lonx.lyrico.viewmodel.ArtistPosterFile
 import com.lonx.lyrico.ui.components.base.YesNoDialog
+import androidx.compose.foundation.text.input.TextFieldLineLimits
+import androidx.compose.foundation.text.input.rememberTextFieldState
+import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 
 @Composable
 @Destination<RootGraph>(route = "artist_poster_folders")
@@ -75,7 +78,8 @@ fun ArtistPosterFoldersScreen(navigator: DestinationsNavigator) {
     var previewUri by remember(state.folder?.uri) { mutableStateOf<String?>(null) }
     var showDeleteFile by remember { mutableStateOf(false) }
     var showRenameFile by remember { mutableStateOf(false) }
-    var renameStem by remember { mutableStateOf("") }
+    val renameState = rememberTextFieldState()
+    val renameStem = renameState.text.toString()
     var cropFile by remember { mutableStateOf<ArtistPosterFile?>(null) }
     var cropBitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
     var showCrop by remember { mutableStateOf(false) }
@@ -204,7 +208,7 @@ fun ArtistPosterFoldersScreen(navigator: DestinationsNavigator) {
                     onCrop = viewModel::cropFile,
                     onRename = { target ->
                         actionFile = target
-                        renameStem = target.name.substringBeforeLast('.')
+                        renameState.setTextAndPlaceCursorAtEnd(target.name.substringBeforeLast('.'))
                         showRenameFile = true
                     },
                     onArtistDetails = { target ->
@@ -263,7 +267,7 @@ fun ArtistPosterFoldersScreen(navigator: DestinationsNavigator) {
             ItemMenuAction(
                 icon = LucideIcons.Pencil, tone = PreferenceIconTone.Appearance,
                 title = stringResource(R.string.action_rename), enabled = !state.isEditing, onClick = {
-                renameStem = file?.name?.substringBeforeLast('.').orEmpty()
+                renameState.setTextAndPlaceCursorAtEnd(file?.name?.substringBeforeLast('.').orEmpty())
                 showFileMenu = false; showRenameFile = true
             })
             if (file?.name?.substringAfterLast('.')?.lowercase() in listOf("jpg", "jpeg", "png", "webp")) {
@@ -289,9 +293,9 @@ fun ArtistPosterFoldersScreen(navigator: DestinationsNavigator) {
             // Salt 原生弹窗：保留取消、点击外部、关闭完成与校验失败不关窗的语义。
             val folder = state.folder
             if (showDeleteFile && file != null) {
-                com.moriafly.salt.ui.dialog.YesNoDialog(
+                com.lonx.lyrico.ui.components.salt.SaltConfirmDialog(
                     title = stringResource(R.string.dialog_delete_file_title),
-                    content = stringResource(R.string.dialog_delete_file_content, file.name),
+                    summary = stringResource(R.string.dialog_delete_file_content, file.name),
                     onDismissRequest = { showDeleteFile = false },
                     onConfirm = { file.let(viewModel::deleteFile); showDeleteFile = false },
                     cancelText = stringResource(R.string.cancel),
@@ -318,7 +322,7 @@ fun ArtistPosterFoldersScreen(navigator: DestinationsNavigator) {
                 com.moriafly.salt.ui.RoundedColumn(paddingValues = PaddingValues(0.dp)) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.weight(1f)) {
-                            SaltTextInput(text = renameStem, onChange = { renameStem = it })
+                            SaltTextInput(state = renameState)
                         }
                         if (fileExtension.isNotEmpty()) com.moriafly.salt.ui.Text(
                             "." + fileExtension, style = com.moriafly.salt.ui.SaltTheme.textStyles.main,
@@ -338,8 +342,8 @@ fun ArtistPosterFoldersScreen(navigator: DestinationsNavigator) {
                     modifier = Modifier.padding(top = 8.dp))
             }
             if (showHelp) {
-                com.moriafly.salt.ui.dialog.BasicDialog(onDismissRequest = { showHelp = false }) {
-                    com.moriafly.salt.ui.dialog.DialogTitle(stringResource(R.string.artist_poster_naming))
+                com.lonx.lyrico.ui.components.salt.SaltBasicDialog(onDismissRequest = { showHelp = false }) {
+                    com.lonx.lyrico.ui.components.salt.SaltDialogTitle(stringResource(R.string.artist_poster_naming))
                     Column(Modifier.fillMaxWidth().heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
                         com.moriafly.salt.ui.Text(
                             stringResource(R.string.artist_poster_folders_summary),
@@ -359,10 +363,10 @@ fun ArtistPosterFoldersScreen(navigator: DestinationsNavigator) {
                 }
             }
             if (folder != null && showFolderDetails) {
-                com.moriafly.salt.ui.dialog.BasicDialog(onDismissRequest = { showFolderDetails = false }) {
-                    com.moriafly.salt.ui.dialog.DialogTitle(stringResource(R.string.artist_poster_folder_details))
+                com.lonx.lyrico.ui.components.salt.SaltBasicDialog(onDismissRequest = { showFolderDetails = false }) {
+                    com.lonx.lyrico.ui.components.salt.SaltDialogTitle(stringResource(R.string.artist_poster_folder_details))
                     Column(Modifier.verticalScroll(rememberScrollState())) {
-                        com.moriafly.salt.ui.Text(folder.name, style = com.moriafly.salt.ui.SaltTheme.textStyles.largeTitle)
+                        com.moriafly.salt.ui.Text(folder.name, style = com.moriafly.salt.ui.SaltTheme.textStyles.main)
                         com.moriafly.salt.ui.Text(
                             folder.path,
                             color = com.moriafly.salt.ui.SaltTheme.colors.subText,
@@ -377,9 +381,9 @@ fun ArtistPosterFoldersScreen(navigator: DestinationsNavigator) {
                 }
             }
             if (showRemoveDialog && folder != null) {
-                com.moriafly.salt.ui.dialog.YesNoDialog(
+                com.lonx.lyrico.ui.components.salt.SaltConfirmDialog(
                     title = stringResource(R.string.dialog_remove_folder_title),
-                    content = folder.path + "\n\n" + stringResource(R.string.artist_poster_folder_remove_tip),
+                    summary = folder.path + "\n\n" + stringResource(R.string.artist_poster_folder_remove_tip),
                     onDismissRequest = { showRemoveDialog = false },
                     onConfirm = { viewModel.removeFolder(); showRemoveDialog = false },
                     cancelText = stringResource(R.string.cancel),
@@ -405,10 +409,12 @@ fun ArtistPosterFoldersScreen(navigator: DestinationsNavigator) {
                     }
                 } },
                 content = {
-                    TextField(value = renameStem, onValueChange = { renameStem = it }, maxLines = 1,
+                    TextField(state = renameState,
                         modifier = Modifier.fillMaxWidth(), trailingIcon = {
                             Text("." + file?.name?.substringAfterLast('.').orEmpty(), modifier = Modifier.padding(horizontal = 12.dp))
-                        })
+                        },
+                        lineLimits = TextFieldLineLimits.SingleLine,
+                    )
                     Text(stringResource(R.string.poster_rename_hint), style = MiuixTheme.textStyles.footnote1,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(top = 8.dp))
                     if (proposedName == null) Text(stringResource(R.string.poster_rename_invalid),

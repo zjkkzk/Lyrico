@@ -71,7 +71,7 @@ import com.lonx.lyrico.viewmodel.AppLogEvent
 import com.lonx.lyrico.viewmodel.AppLogViewModel
 import com.lonx.lyrico.ui.components.miuix.MiuixBottomSheet
 import com.moriafly.salt.ui.SaltTheme
-import com.moriafly.salt.ui.dialog.YesNoDialog as SaltYesNoDialog
+import com.lonx.lyrico.ui.components.salt.SaltConfirmDialog
 import com.moriafly.salt.ui.screen.ScreenCard
 import com.ramcosta.composedestinations.annotation.Destination
 import com.ramcosta.composedestinations.annotation.RootGraph
@@ -105,7 +105,6 @@ fun AppLogScreen(
     navigator: DestinationsNavigator
 ) {
     val viewModel: AppLogViewModel = koinViewModel()
-    val logs by viewModel.logs.collectAsState()
     val clipboardManager = LocalClipboard.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -123,10 +122,23 @@ fun AppLogScreen(
     val logRetentionOption by viewModel.logRetentionOption.collectAsState()
     val logRetentionItems = LogRetentionOption.entries.map { stringResource(it.labelRes) }
     val selectedLogRetentionIndex = LogRetentionOption.entries.indexOf(logRetentionOption).coerceAtLeast(0)
-    val filteredLogs = remember(logs, selectedLevel, selectedType) {
-        logs.filter { log ->
-            (selectedLevel == null || log.level == selectedLevel) &&
-                    (selectedType == null || log.type == selectedType)
+    val filteredLogs by remember(viewModel, selectedLevel, selectedType) {
+        viewModel.observeLogs(selectedLevel, selectedType)
+    }.collectAsState(initial = emptyList())
+    var preparingDelete by remember { mutableStateOf(false) }
+    val prepareDelete: () -> Unit = {
+        if (!preparingDelete) {
+            preparingDelete = true
+            val level = selectedLevel
+            val type = selectedType
+            scope.launch {
+                try {
+                    pendingDeleteIds = viewModel.getMatchingIds(level, type)
+                    showDeleteConfirmDialog = pendingDeleteIds.isNotEmpty()
+                } finally {
+                    preparingDelete = false
+                }
+            }
         }
     }
 
@@ -189,8 +201,7 @@ fun AppLogScreen(
                 enabled = filteredLogs.isNotEmpty(),
                 tint = SaltTheme.colors.error,
                 onClick = {
-                    pendingDeleteIds = filteredLogs.map { it.id }
-                    showDeleteConfirmDialog = true
+                    prepareDelete()
                 }
             )
         },
@@ -226,8 +237,7 @@ fun AppLogScreen(
                         IconButton(
                             enabled = filteredLogs.isNotEmpty(),
                             onClick = {
-                                pendingDeleteIds = filteredLogs.map { it.id }
-                                showDeleteConfirmDialog = true
+                                prepareDelete()
                             }
                         ) {
                             Icon(
@@ -363,9 +373,9 @@ fun AppLogScreen(
     )
 
     if (salt) {
-        if (showDeleteConfirmDialog) SaltYesNoDialog(
+        if (showDeleteConfirmDialog) SaltConfirmDialog(
             title = stringResource(R.string.app_log_delete_title),
-            content = stringResource(R.string.app_log_delete_message, pendingDeleteIds.size),
+            summary = stringResource(R.string.app_log_delete_message, pendingDeleteIds.size),
             onDismissRequest = { showDeleteConfirmDialog = false },
             onConfirm = {
                 viewModel.deleteLogs(pendingDeleteIds)
