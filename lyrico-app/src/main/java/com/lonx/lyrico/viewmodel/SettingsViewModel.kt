@@ -5,7 +5,7 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.lonx.lyrico.R
-import com.lonx.lyrico.data.LyricoDatabase
+import com.lonx.lyrico.utils.LibraryScanManager
 import com.lonx.lyrico.data.model.log.AppLogLevel
 import com.lonx.lyrico.data.model.log.AppLogType
 import com.lonx.lyrico.data.model.ArtistSeparator
@@ -38,11 +38,16 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
+import com.lonx.lyrico.platform.player.AudioPlayerApps
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.withContext
 
 data class SettingsUiState(
     val isInitialized: Boolean = false,
+    val defaultPlayerComponent: String? = null,
+    val defaultPlayerLabel: String? = null,
+    val artistPosterFolder: String? = null,
     val lyricFormat: LyricFormat = LyricFormat.VERBATIM_LRC,
     val separator: ArtistSeparator = ArtistSeparator.SLASH,
     val romaEnabled: Boolean = false,
@@ -82,11 +87,38 @@ sealed class SettingsEvent {
 }
 class SettingsViewModel(
     private val settingsRepository: SettingsRepository,
-    private val database: LyricoDatabase,
-    private val appLogRepository: AppLogRepository
+    private val libraryScanManager: LibraryScanManager,
+    private val appLogRepository: AppLogRepository,
+    private val applicationContext: Context,
+    private val cacheManager: CacheManager,
 ) : ViewModel() {
-    private val folder = database.folderDao()
     private val _categorizedCacheSize = MutableStateFlow<Map<CacheCategory, Long>>(emptyMap())
+    private val defaultPlayerRefresh = MutableStateFlow(0L)
+    private data class DefaultPlayerState(val component: String?, val label: String?)
+    private val defaultPlayerState = combine(
+        settingsRepository.defaultPlayerComponent, defaultPlayerRefresh
+    ) { component, _ -> component }.map { component ->
+        val label = component?.let { withContext(Dispatchers.IO) { AudioPlayerApps.label(applicationContext, it) } }
+        DefaultPlayerState(component, label)
+    }
+
+    fun refreshDefaultPlayerInfo() {
+        defaultPlayerRefresh.value++
+    }
+
+    fun setDefaultPlayerComponent(component: String?) {
+        viewModelScope.launch {
+            try {
+                settingsRepository.saveDefaultPlayerComponent(component)
+            } catch (error: kotlinx.coroutines.CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                _events.emit(SettingsEvent.ShowToast(
+                    UiMessage.StringResource(R.string.unknown_error, error.message.orEmpty())
+                ))
+            }
+        }
+    }
 
     private data class SettingsBaseState(
         val lyric: LyricRenderConfig,
@@ -158,10 +190,15 @@ class SettingsViewModel(
     private val baseUiState = combine(
         settingsBaseState,
         _categorizedCacheSize,
-        settingsRepository.lyricIndexEnabled
-    ) { base, cacheMap, lyricIndexEnabled ->
+        settingsRepository.lyricIndexEnabled,
+        defaultPlayerState,
+        settingsRepository.artistPosterFolder,
+    ) { base, cacheMap, lyricIndexEnabled, defaultPlayer, artistPosterFolder ->
         SettingsUiState(
             isInitialized = true,
+            defaultPlayerComponent = defaultPlayer.component,
+            defaultPlayerLabel = defaultPlayer.label,
+            artistPosterFolder = artistPosterFolder,
             lyricFormat = base.lyric.format,
             romaEnabled = base.lyric.showRomanization,
             lyricLineOrder = base.lyric.normalizedLineOrder,
@@ -204,17 +241,33 @@ class SettingsViewModel(
             settingsRepository.saveLyricDisplayMode(mode)
         }
     }
-    fun refreshCache(context: Context) {
+    fun refreshCache() {
         viewModelScope.launch {
-            val sizes = CacheManager.getCategorizedCacheSize(context)
-            _categorizedCacheSize.value = sizes
+            try {
+                _categorizedCacheSize.value = cacheManager.getCategorizedCacheSize()
+            } catch (error: Exception) {
+                reportCacheFailure(error)
+            }
         }
     }
-    fun clearCache(context: Context) {
+    fun clearCache() {
         viewModelScope.launch {
-            CacheManager.clearAllCache(context)
-            refreshCache(context)
+            try {
+                cacheManager.clearAllCache()
+                _categorizedCacheSize.value = cacheManager.getCategorizedCacheSize()
+            } catch (error: Exception) {
+                reportCacheFailure(error)
+            }
         }
+    }
+
+    private suspend fun reportCacheFailure(error: Exception) {
+        if (error is kotlinx.coroutines.CancellationException) throw error
+        appLogRepository.recordOperation(AppLogType.APP, TAG, "Cache operation failed",
+            error.stackTraceToString(), level = AppLogLevel.ERROR)
+        _events.emit(SettingsEvent.ShowToast(UiMessage.StringResource(
+            R.string.cache_operation_failed, error.message ?: error::class.java.simpleName
+        )))
     }
 
     fun setLyricLineOrder(order: List<LyricLineTrack>) {
@@ -227,10 +280,13 @@ class SettingsViewModel(
         }
     }
 
-    suspend fun clearSongs(): Boolean = withContext(Dispatchers.IO) {
-        folder.clearAllFolders()
-        val counts = folder.getFoldersCount()
-        counts == 0
+    suspend fun clearSongs(): Boolean = try {
+        libraryScanManager.clearLibrary()
+    } catch (error: Exception) {
+        if (error is kotlinx.coroutines.CancellationException) throw error
+        appLogRepository.recordOperation(AppLogType.DATABASE, TAG, "Library reset failed",
+            error.stackTraceToString(), level = AppLogLevel.ERROR)
+        false
     }
     fun setTranslationEnabled(enabled: Boolean) {
         viewModelScope.launch {
@@ -461,6 +517,7 @@ class SettingsViewModel(
                     ))
                 }
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 e.printStackTrace()
                 appLogRepository.logException(
                     type = AppLogType.APP,

@@ -20,12 +20,14 @@ import com.lonx.lyrico.data.model.AlbumSortInfo
 import com.lonx.lyrico.data.model.ArtistSortInfo
 import com.lonx.lyrico.data.model.artist.ArtistSplitConfig
 import com.lonx.lyrico.ui.theme.KeyColor
-import com.lonx.lyrico.viewmodel.SortInfo
+import com.lonx.lyrico.data.model.SortInfo
 import com.lonx.lyrico.data.model.lyrics.SourceRuntimeConfig
 import kotlinx.coroutines.flow.Flow
 
 
 interface SettingsRepository {
+    val defaultPlayerComponent: Flow<String?>
+    suspend fun saveDefaultPlayerComponent(component: String?)
     val proActivated: Flow<Boolean>
     suspend fun activatePro()
     suspend fun deactivatePro()

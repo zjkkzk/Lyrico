@@ -96,10 +96,13 @@ fun SettingsScreen(
 ) {
     val settingsViewModel: SettingsViewModel = koinViewModel()
     val settingsUiState by settingsViewModel.uiState.collectAsStateWithLifecycle()
+    androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+        settingsViewModel.refreshDefaultPlayerInfo()
+    }
     val folderViewModel: FolderManagerViewModel = koinViewModel()
     val folderUiState by folderViewModel.uiState.collectAsStateWithLifecycle()
     val settingsRepository: SettingsRepository = koinInject()
-    val artistPosterFolder by settingsRepository.artistPosterFolder.collectAsStateWithLifecycle(initialValue = null)
+    val artistPosterFolder = settingsUiState.artistPosterFolder
 
     val uiEngine = LocalUiEngine.current
     val lyricFormat = settingsUiState.lyricFormat
@@ -180,7 +183,7 @@ fun SettingsScreen(
     val selectedArtistSeparatorIndex = artistSeparators.indexOf(artistSeparator).coerceAtLeast(0)
 
     LaunchedEffect(Unit) {
-        settingsViewModel.refreshCache(context)
+        settingsViewModel.refreshCache()
     }
 
     val exportLauncher = rememberLauncherForActivityResult(
@@ -597,6 +600,11 @@ fun SettingsScreen(
             item(key = "other"){
                 SectionTitle(text = stringResource(R.string.section_other))
                 Group {
+                    DefaultPlayerSetting(
+                        selected = settingsUiState.defaultPlayerComponent,
+                        selectedLabel = settingsUiState.defaultPlayerLabel,
+                        onSelect = settingsViewModel::setDefaultPlayerComponent,
+                    )
                     Action(
                         icon = LucideIcons.ClipboardList, tone = PreferenceIconTone.Library,
                         title = stringResource(R.string.batch_task_list_title),
@@ -641,17 +649,11 @@ fun SettingsScreen(
                             onClick = {
                                 scope.launch {
                                     val success = settingsViewModel.clearSongs()
-                                    if (success) {
-                                        Toast.makeText(context, "已清空数据库", Toast.LENGTH_SHORT)
-                                            .show()
-                                    } else {
-                                        Toast.makeText(
-                                            context,
-                                            "清空数据库失败",
-                                            Toast.LENGTH_SHORT
-                                        )
-                                            .show()
-                                    }
+                                    Toast.makeText(
+                                        context,
+                                        if (success) R.string.library_cleared else R.string.library_clear_failed,
+                                        Toast.LENGTH_SHORT
+                                    ).show()
                                 }
                             }
                         )
@@ -674,7 +676,7 @@ fun SettingsScreen(
         text = cacheContent,
         onDismiss = { showClearCacheDialog.value = false },
         onConfirm = {
-            settingsViewModel.clearCache(context)
+            settingsViewModel.clearCache()
             showClearCacheDialog.value = false
         },
     )

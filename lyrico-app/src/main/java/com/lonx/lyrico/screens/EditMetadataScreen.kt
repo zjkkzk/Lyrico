@@ -131,7 +131,7 @@ import com.lonx.lyrico.domain.poster.ArtistPosterGrouping
 import com.lonx.lyrico.domain.poster.ResolvedArtistPoster
 import com.lonx.lyrico.domain.poster.ArtistPosterPages
 import com.lonx.lyrico.plugin.source.SearchSourceProvider
-import com.lonx.lyrico.ui.components.CoverRequest
+import com.lonx.lyrico.data.model.artwork.CoverRequest
 import com.lonx.lyrico.ui.components.PagerDotsIndicator
 import com.lonx.lyrico.ui.components.base.LyricsOffsetField
 import com.lonx.lyrico.ui.components.base.ExportDestinationBottomSheet
@@ -143,7 +143,6 @@ import com.lonx.lyrico.ui.components.fab.ExpandableFabMenu
 import com.lonx.lyrico.ui.components.fab.ExpandableFabMenuStyle
 import com.lonx.lyrico.ui.components.fab.FabMenuItem
 import com.lonx.lyrico.ui.components.getBitmap
-import com.lonx.lyrico.ui.components.player.PlayerPickerBottomSheet
 import com.lonx.lyrico.ui.components.poster.ArtistPosterMenu
 import com.lonx.lyrico.ui.components.poster.rememberArtistPosterMenuState
 import com.lonx.lyrico.ui.components.rememberTintedPainter
@@ -151,7 +150,7 @@ import com.lonx.lyrico.ui.components.scaffoldTopHorizontalPadding
 import com.lonx.lyrico.ui.theme.LyricoColors
 import com.lonx.lyrico.utils.CoverSourceType
 import com.lonx.lyrico.utils.getCoverSourceType
-import com.lonx.lyrico.utils.coil.ArtistPosterReader
+import com.lonx.lyrico.data.artwork.ArtistPosterReader
 import com.lonx.lyrico.viewmodel.EditMetadataViewModel
 import com.lonx.lyrico.viewmodel.isEqualIgnoringBlank
 import com.ramcosta.composedestinations.annotation.Destination
@@ -292,7 +291,6 @@ fun EditMetadataScreen(
     var showAddCustomTagDialog by remember { mutableStateOf(false) }
     var lyricsOperation by remember { mutableStateOf(LyricsOperation.CONVERT) }
     var showLyricsProcessingSheet by remember { mutableStateOf(false) }
-    var showPlayerPicker by remember { mutableStateOf(false) }
     var bitmapToCrop by remember { mutableStateOf<Bitmap?>(null) }
     var cropRequest by remember { mutableStateOf<CropRequest>(CropRequest.Cover) }
     var isFabMenuExpanded by remember { mutableStateOf(false) }
@@ -570,7 +568,7 @@ fun EditMetadataScreen(
             } else {
                 context.getString(
                     R.string.msg_save_failed_with_reason,
-                    uiState.saveFailureMessage ?: context.getString(R.string.unknown_error_simple)
+                    uiState.saveFailureMessage?.asString(context) ?: context.getString(R.string.unknown_error_simple)
                 )
             }
             scope.launch {
@@ -1317,7 +1315,7 @@ Box(modifier = Modifier.fillMaxSize()) {
             icon = LucideIcons.Play,
             onClick = {
                 isFabMenuExpanded = false
-                showPlayerPicker = true
+                viewModel.play(context)
             }
         )
 
@@ -1331,11 +1329,6 @@ Box(modifier = Modifier.fillMaxSize()) {
         )
     }
 }
-    PlayerPickerBottomSheet(
-        show = showPlayerPicker,
-        uri = songFileUri.toUri(),
-        onDismissRequest = { showPlayerPicker = false }
-    )
     // 歌词操作
     EditorSheet(
         show = showLyricsActionBottomSheet,
